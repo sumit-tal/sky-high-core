@@ -1,6 +1,6 @@
 # SkyHigh Core — Progress Tracker
 
-> Last updated: 2026-02-13
+> Last updated: 2026-02-14
 
 ---
 
@@ -8,9 +8,9 @@
 
 | Status         | Count  |
 | -------------- | ------ |
-| ✅ Completed   | 4      |
+| ✅ Completed   | 5      |
 | 🔧 In Progress | 0      |
-| ⬜ Not Started | 17     |
+| ⬜ Not Started | 16     |
 | **Total**      | **21** |
 
 ---
@@ -23,7 +23,7 @@
 | 002 | [Docker Compose & Infrastructure](tasks/002-docker-compose-infrastructure.md)     | ✅ Completed   | Dockerfile, docker-compose.yml, stub services, health checks, Redis keyspace notifications                                 |
 | 003 | [Database Setup, Entities & Migrations](tasks/003-database-setup-and-entities.md) | ✅ Completed   | TypeORM config, 8 entities, enums, indexes, migration, seed script (3 aircraft types, 3 flights, 878 seats, 10 passengers) |
 | 004 | [Redis Client & Redlock Setup](tasks/004-redis-setup.md)                          | ✅ Completed   | Redis client/subscriber providers, Redlock, key constants, keyspace expiry subscriber, RedisService utility, unit tests    |
-| 005 | [JWT Authentication Guard](tasks/005-auth-jwt-guard.md)                           | ⬜ Not Started |                                                                                                                            |
+| 005 | [JWT Authentication Guard](tasks/005-auth-jwt-guard.md)                           | ✅ Completed   | JWT guard (global via APP_GUARD), @Public decorator, @CurrentUser decorator, test JWT utility, 9 unit tests                |
 | 006 | [Global Exception Filter (RFC 7807)](tasks/006-global-error-handling.md)          | ⬜ Not Started |                                                                                                                            |
 | 007 | [Health Check Module](tasks/007-health-module.md)                                 | ⬜ Not Started |                                                                                                                            |
 | 008 | [Flight Module](tasks/008-flight-module.md)                                       | ⬜ Not Started |                                                                                                                            |
@@ -55,7 +55,7 @@ Infrastructure, database, Redis, auth, error handling, and health checks.
 | 002 Docker Compose            | ✅     |
 | 003 Database & Entities       | ✅     |
 | 004 Redis & Redlock           | ✅     |
-| 005 JWT Auth Guard            | ⬜     |
+| 005 JWT Auth Guard            | ✅     |
 | 006 Error Handling (RFC 7807) | ⬜     |
 | 007 Health Module             | ⬜     |
 
@@ -104,3 +104,4 @@ Unit tests, integration tests, and load tests.
 | 2026-02-13 | 002  | ✅ Completed — Dockerfile (multi-stage), docker-compose.yml with 7 services, stub services (payment/weight/notification), health checks, Redis keyspace notifications, .dockerignore                                                                            |
 | 2026-02-13 | 003  | ✅ Completed — TypeORM DataSource config, 8 entities (AircraftType, Flight, Passenger, Seat, CheckIn, Waitlist, AuditLog, AbuseEvent), all indexes per PRD §2.3, migration, seed script                                                                         |
 | 2026-02-13 | 004  | ✅ Completed — Redis client & subscriber providers (ioredis), Redlock distributed locking, typed key constants & builders, keyspace expiry subscriber (hold:\* → event), RedisService utility (CAS release, rate-limit pipeline, seat map cache), 36 unit tests |
+| 2026-02-14 | 005  | ✅ Completed — JwtAuthGuard (global via APP_GUARD), @Public decorator for public routes, @CurrentUser param decorator, Express type augmentation, JwtModule registration, generateTestJwt utility, 9 unit tests                                                 |

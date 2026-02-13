@@ -1,9 +1,12 @@
 import { Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
 import { ConfigModule, ConfigService } from "@nestjs/config";
+import { JwtModule } from "@nestjs/jwt";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { LoggerModule } from "nestjs-pino";
 import { PrometheusModule } from "@willsoto/nestjs-prometheus";
 import { envValidationSchema } from "./common/config/env.validation";
+import { JwtAuthGuard } from "./common/guards";
 import { RedisModule } from "./common/redis";
 import { HealthModule } from "./health/health.module";
 
@@ -40,8 +43,22 @@ import { HealthModule } from "./health/health.module";
     PrometheusModule.register({
       defaultMetrics: { enabled: true },
     }),
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.get<string>("JWT_SECRET"),
+        signOptions: { expiresIn: "1h" },
+      }),
+    }),
     RedisModule,
     HealthModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
   ],
 })
 export class AppModule {}

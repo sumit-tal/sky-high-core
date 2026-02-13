@@ -1,16 +1,18 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get } from "@nestjs/common";
+import { Public } from "../common/decorators";
 
 interface HealthCheckResponse {
   status: string;
   timestamp: string;
 }
 
-@Controller('health')
+@Controller("health")
 export class HealthController {
+  @Public()
   @Get()
   check(): HealthCheckResponse {
     return {
-      status: 'ok',
+      status: "ok",
       timestamp: new Date().toISOString(),
     };
   }
