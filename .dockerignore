@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+stubs/*/node_modules/
+
+# Build
+dist/
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+
+# Logs
+*.log
+
+# Temp
+tmp/
+
+# Git
+.git/
+.gitignore
+
+# Tests
+test/
+k6/
+*.spec.ts
+
+# Documentation
+*.md
+!README.md
+
+# Docker
+docker-compose.yml
+Dockerfile

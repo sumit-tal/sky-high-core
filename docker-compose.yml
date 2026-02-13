@@ -1,0 +1,117 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: skyhigh-app
+    ports:
+      - "3010:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://skyhigh:skyhigh@postgres:5432/skyhigh
+      REDIS_URL: redis://redis:6379
+      PAYMENT_SERVICE_URL: http://stub-payment:3001
+      WEIGHT_SERVICE_URL: http://stub-weight:3002
+      NOTIFICATION_SERVICE_URL: http://stub-notification:3003
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - skyhigh-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: skyhigh-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: skyhigh
+      POSTGRES_PASSWORD: skyhigh
+      POSTGRES_DB: skyhigh
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skyhigh -d skyhigh"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - skyhigh-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: skyhigh-redis
+    ports:
+      - "6380:6379"
+    command: redis-server --notify-keyspace-events Ex
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - skyhigh-network
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: skyhigh-pgadmin
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@skyhigh.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - skyhigh-network
+
+  stub-payment:
+    build:
+      context: ./stubs/payment
+      dockerfile: Dockerfile
+    container_name: skyhigh-stub-payment
+    ports:
+      - "3001:3001"
+    networks:
+      - skyhigh-network
+
+  stub-weight:
+    build:
+      context: ./stubs/weight
+      dockerfile: Dockerfile
+    container_name: skyhigh-stub-weight
+    ports:
+      - "3002:3002"
+    networks:
+      - skyhigh-network
+
+  stub-notification:
+    build:
+      context: ./stubs/notification
+      dockerfile: Dockerfile
+    container_name: skyhigh-stub-notification
+    ports:
+      - "3003:3003"
+    networks:
+      - skyhigh-network
+
+volumes:
+  postgres-data:
+  redis-data:
+  pgadmin-data:
+
+networks:
+  skyhigh-network:
+    driver: bridge
