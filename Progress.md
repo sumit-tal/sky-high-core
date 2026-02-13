@@ -8,9 +8,9 @@
 
 | Status         | Count  |
 | -------------- | ------ |
-| ✅ Completed   | 5      |
+| ✅ Completed   | 6      |
 | 🔧 In Progress | 0      |
-| ⬜ Not Started | 16     |
+| ⬜ Not Started | 15     |
 | **Total**      | **21** |
 
 ---
@@ -24,7 +24,7 @@
 | 003 | [Database Setup, Entities & Migrations](tasks/003-database-setup-and-entities.md) | ✅ Completed   | TypeORM config, 8 entities, enums, indexes, migration, seed script (3 aircraft types, 3 flights, 878 seats, 10 passengers) |
 | 004 | [Redis Client & Redlock Setup](tasks/004-redis-setup.md)                          | ✅ Completed   | Redis client/subscriber providers, Redlock, key constants, keyspace expiry subscriber, RedisService utility, unit tests    |
 | 005 | [JWT Authentication Guard](tasks/005-auth-jwt-guard.md)                           | ✅ Completed   | JWT guard (global via APP_GUARD), @Public decorator, @CurrentUser decorator, test JWT utility, 9 unit tests                |
-| 006 | [Global Exception Filter (RFC 7807)](tasks/006-global-error-handling.md)          | ⬜ Not Started |                                                                                                                            |
+| 006 | [Global Exception Filter (RFC 7807)](tasks/006-global-error-handling.md)          | ✅ Completed   | Global exception filter (catches all), RFC 7807 ProblemDetails, 10 domain exceptions, error type constants, 25 unit tests  |
 | 007 | [Health Check Module](tasks/007-health-module.md)                                 | ⬜ Not Started |                                                                                                                            |
 | 008 | [Flight Module](tasks/008-flight-module.md)                                       | ⬜ Not Started |                                                                                                                            |
 | 009 | [Seat Map Module](tasks/009-seat-map-module.md)                                   | ⬜ Not Started |                                                                                                                            |
@@ -56,7 +56,7 @@ Infrastructure, database, Redis, auth, error handling, and health checks.
 | 003 Database & Entities       | ✅     |
 | 004 Redis & Redlock           | ✅     |
 | 005 JWT Auth Guard            | ✅     |
-| 006 Error Handling (RFC 7807) | ⬜     |
+| 006 Error Handling (RFC 7807) | ✅     |
 | 007 Health Module             | ⬜     |
 
 ### Phase 2 — Core Domain (Tasks 008–016)
@@ -105,3 +105,4 @@ Unit tests, integration tests, and load tests.
 | 2026-02-13 | 003  | ✅ Completed — TypeORM DataSource config, 8 entities (AircraftType, Flight, Passenger, Seat, CheckIn, Waitlist, AuditLog, AbuseEvent), all indexes per PRD §2.3, migration, seed script                                                                         |
 | 2026-02-13 | 004  | ✅ Completed — Redis client & subscriber providers (ioredis), Redlock distributed locking, typed key constants & builders, keyspace expiry subscriber (hold:\* → event), RedisService utility (CAS release, rate-limit pipeline, seat map cache), 36 unit tests |
 | 2026-02-14 | 005  | ✅ Completed — JwtAuthGuard (global via APP_GUARD), @Public decorator for public routes, @CurrentUser param decorator, Express type augmentation, JwtModule registration, generateTestJwt utility, 9 unit tests                                                 |
+| 2026-02-14 | 006  | ✅ Completed — Global exception filter (@Catch() all), RFC 7807 ProblemDetails format, 10 domain exception classes, error type constants, TypeORM error handling, Content-Type application/problem+json, 25 unit tests                                          |
