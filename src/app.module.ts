@@ -4,6 +4,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { LoggerModule } from "nestjs-pino";
 import { PrometheusModule } from "@willsoto/nestjs-prometheus";
 import { envValidationSchema } from "./common/config/env.validation";
+import { RedisModule } from "./common/redis";
 import { HealthModule } from "./health/health.module";
 
 @Module({
@@ -39,6 +40,7 @@ import { HealthModule } from "./health/health.module";
     PrometheusModule.register({
       defaultMetrics: { enabled: true },
     }),
+    RedisModule,
     HealthModule,
   ],
 })

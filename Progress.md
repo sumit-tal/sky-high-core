@@ -8,9 +8,9 @@
 
 | Status         | Count  |
 | -------------- | ------ |
-| ✅ Completed   | 3      |
+| ✅ Completed   | 4      |
 | 🔧 In Progress | 0      |
-| ⬜ Not Started | 18     |
+| ⬜ Not Started | 17     |
 | **Total**      | **21** |
 
 ---
@@ -22,7 +22,7 @@
 | 001 | [Project Setup & Configuration](tasks/001-project-setup.md)                       | ✅ Completed   | NestJS init, dependencies, config, validation pipe, API prefix                                                             |
 | 002 | [Docker Compose & Infrastructure](tasks/002-docker-compose-infrastructure.md)     | ✅ Completed   | Dockerfile, docker-compose.yml, stub services, health checks, Redis keyspace notifications                                 |
 | 003 | [Database Setup, Entities & Migrations](tasks/003-database-setup-and-entities.md) | ✅ Completed   | TypeORM config, 8 entities, enums, indexes, migration, seed script (3 aircraft types, 3 flights, 878 seats, 10 passengers) |
-| 004 | [Redis Client & Redlock Setup](tasks/004-redis-setup.md)                          | ⬜ Not Started |                                                                                                                            |
+| 004 | [Redis Client & Redlock Setup](tasks/004-redis-setup.md)                          | ✅ Completed   | Redis client/subscriber providers, Redlock, key constants, keyspace expiry subscriber, RedisService utility, unit tests    |
 | 005 | [JWT Authentication Guard](tasks/005-auth-jwt-guard.md)                           | ⬜ Not Started |                                                                                                                            |
 | 006 | [Global Exception Filter (RFC 7807)](tasks/006-global-error-handling.md)          | ⬜ Not Started |                                                                                                                            |
 | 007 | [Health Check Module](tasks/007-health-module.md)                                 | ⬜ Not Started |                                                                                                                            |
@@ -54,7 +54,7 @@ Infrastructure, database, Redis, auth, error handling, and health checks.
 | 001 Project Setup             | ✅     |
 | 002 Docker Compose            | ✅     |
 | 003 Database & Entities       | ✅     |
-| 004 Redis & Redlock           | ⬜     |
+| 004 Redis & Redlock           | ✅     |
 | 005 JWT Auth Guard            | ⬜     |
 | 006 Error Handling (RFC 7807) | ⬜     |
 | 007 Health Module             | ⬜     |
@@ -98,8 +98,9 @@ Unit tests, integration tests, and load tests.
 
 ## Changelog
 
-| Date       | Task | Change                                                                                                                                                                                  |
-| ---------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-02-13 | 001  | ✅ Completed — Project initialized with NestJS, all dependencies installed, config/validation/API prefix set up                                                                         |
-| 2026-02-13 | 002  | ✅ Completed — Dockerfile (multi-stage), docker-compose.yml with 7 services, stub services (payment/weight/notification), health checks, Redis keyspace notifications, .dockerignore    |
-| 2026-02-13 | 003  | ✅ Completed — TypeORM DataSource config, 8 entities (AircraftType, Flight, Passenger, Seat, CheckIn, Waitlist, AuditLog, AbuseEvent), all indexes per PRD §2.3, migration, seed script |
+| Date       | Task | Change                                                                                                                                                                                                                                                          |
+| ---------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-02-13 | 001  | ✅ Completed — Project initialized with NestJS, all dependencies installed, config/validation/API prefix set up                                                                                                                                                 |
+| 2026-02-13 | 002  | ✅ Completed — Dockerfile (multi-stage), docker-compose.yml with 7 services, stub services (payment/weight/notification), health checks, Redis keyspace notifications, .dockerignore                                                                            |
+| 2026-02-13 | 003  | ✅ Completed — TypeORM DataSource config, 8 entities (AircraftType, Flight, Passenger, Seat, CheckIn, Waitlist, AuditLog, AbuseEvent), all indexes per PRD §2.3, migration, seed script                                                                         |
+| 2026-02-13 | 004  | ✅ Completed — Redis client & subscriber providers (ioredis), Redlock distributed locking, typed key constants & builders, keyspace expiry subscriber (hold:\* → event), RedisService utility (CAS release, rate-limit pipeline, seat map cache), 36 unit tests |
