@@ -8,38 +8,38 @@
 
 | Status         | Count  |
 | -------------- | ------ |
-| ✅ Completed   | 2      |
+| ✅ Completed   | 3      |
 | 🔧 In Progress | 0      |
-| ⬜ Not Started | 19     |
+| ⬜ Not Started | 18     |
 | **Total**      | **21** |
 
 ---
 
 ## Task Status
 
-| #   | Task                                                                              | Status         | Notes                                                                                      |
-| --- | --------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------ |
-| 001 | [Project Setup & Configuration](tasks/001-project-setup.md)                       | ✅ Completed   | NestJS init, dependencies, config, validation pipe, API prefix                             |
-| 002 | [Docker Compose & Infrastructure](tasks/002-docker-compose-infrastructure.md)     | ✅ Completed   | Dockerfile, docker-compose.yml, stub services, health checks, Redis keyspace notifications |
-| 003 | [Database Setup, Entities & Migrations](tasks/003-database-setup-and-entities.md) | ⬜ Not Started |                                                                                            |
-| 004 | [Redis Client & Redlock Setup](tasks/004-redis-setup.md)                          | ⬜ Not Started |                                                                                            |
-| 005 | [JWT Authentication Guard](tasks/005-auth-jwt-guard.md)                           | ⬜ Not Started |                                                                                            |
-| 006 | [Global Exception Filter (RFC 7807)](tasks/006-global-error-handling.md)          | ⬜ Not Started |                                                                                            |
-| 007 | [Health Check Module](tasks/007-health-module.md)                                 | ⬜ Not Started |                                                                                            |
-| 008 | [Flight Module](tasks/008-flight-module.md)                                       | ⬜ Not Started |                                                                                            |
-| 009 | [Seat Map Module](tasks/009-seat-map-module.md)                                   | ⬜ Not Started |                                                                                            |
-| 010 | [Check-In: Seat Hold](tasks/010-checkin-hold-seat.md)                             | ⬜ Not Started |                                                                                            |
-| 011 | [Hold Expiry Mechanism](tasks/011-hold-expiry-mechanism.md)                       | ⬜ Not Started |                                                                                            |
-| 012 | [Check-In: Confirm & Cancel](tasks/012-checkin-confirm-and-cancel.md)             | ⬜ Not Started |                                                                                            |
-| 013 | [Baggage & Payment Modules](tasks/013-baggage-and-payment-modules.md)             | ⬜ Not Started |                                                                                            |
-| 014 | [Waitlist Module](tasks/014-waitlist-module.md)                                   | ⬜ Not Started |                                                                                            |
-| 015 | [Notification Module](tasks/015-notification-module.md)                           | ⬜ Not Started |                                                                                            |
-| 016 | [Audit Module](tasks/016-audit-module.md)                                         | ⬜ Not Started |                                                                                            |
-| 017 | [Rate Limiter & Abuse Detection](tasks/017-rate-limiter-abuse-detection.md)       | ⬜ Not Started |                                                                                            |
-| 018 | [Observability](tasks/018-observability.md)                                       | ⬜ Not Started |                                                                                            |
-| 019 | [Unit Tests](tasks/019-unit-tests.md)                                             | ⬜ Not Started |                                                                                            |
-| 020 | [Integration Tests](tasks/020-integration-tests.md)                               | ⬜ Not Started |                                                                                            |
-| 021 | [Load Tests](tasks/021-load-tests.md)                                             | ⬜ Not Started |                                                                                            |
+| #   | Task                                                                              | Status         | Notes                                                                                                                      |
+| --- | --------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 001 | [Project Setup & Configuration](tasks/001-project-setup.md)                       | ✅ Completed   | NestJS init, dependencies, config, validation pipe, API prefix                                                             |
+| 002 | [Docker Compose & Infrastructure](tasks/002-docker-compose-infrastructure.md)     | ✅ Completed   | Dockerfile, docker-compose.yml, stub services, health checks, Redis keyspace notifications                                 |
+| 003 | [Database Setup, Entities & Migrations](tasks/003-database-setup-and-entities.md) | ✅ Completed   | TypeORM config, 8 entities, enums, indexes, migration, seed script (3 aircraft types, 3 flights, 878 seats, 10 passengers) |
+| 004 | [Redis Client & Redlock Setup](tasks/004-redis-setup.md)                          | ⬜ Not Started |                                                                                                                            |
+| 005 | [JWT Authentication Guard](tasks/005-auth-jwt-guard.md)                           | ⬜ Not Started |                                                                                                                            |
+| 006 | [Global Exception Filter (RFC 7807)](tasks/006-global-error-handling.md)          | ⬜ Not Started |                                                                                                                            |
+| 007 | [Health Check Module](tasks/007-health-module.md)                                 | ⬜ Not Started |                                                                                                                            |
+| 008 | [Flight Module](tasks/008-flight-module.md)                                       | ⬜ Not Started |                                                                                                                            |
+| 009 | [Seat Map Module](tasks/009-seat-map-module.md)                                   | ⬜ Not Started |                                                                                                                            |
+| 010 | [Check-In: Seat Hold](tasks/010-checkin-hold-seat.md)                             | ⬜ Not Started |                                                                                                                            |
+| 011 | [Hold Expiry Mechanism](tasks/011-hold-expiry-mechanism.md)                       | ⬜ Not Started |                                                                                                                            |
+| 012 | [Check-In: Confirm & Cancel](tasks/012-checkin-confirm-and-cancel.md)             | ⬜ Not Started |                                                                                                                            |
+| 013 | [Baggage & Payment Modules](tasks/013-baggage-and-payment-modules.md)             | ⬜ Not Started |                                                                                                                            |
+| 014 | [Waitlist Module](tasks/014-waitlist-module.md)                                   | ⬜ Not Started |                                                                                                                            |
+| 015 | [Notification Module](tasks/015-notification-module.md)                           | ⬜ Not Started |                                                                                                                            |
+| 016 | [Audit Module](tasks/016-audit-module.md)                                         | ⬜ Not Started |                                                                                                                            |
+| 017 | [Rate Limiter & Abuse Detection](tasks/017-rate-limiter-abuse-detection.md)       | ⬜ Not Started |                                                                                                                            |
+| 018 | [Observability](tasks/018-observability.md)                                       | ⬜ Not Started |                                                                                                                            |
+| 019 | [Unit Tests](tasks/019-unit-tests.md)                                             | ⬜ Not Started |                                                                                                                            |
+| 020 | [Integration Tests](tasks/020-integration-tests.md)                               | ⬜ Not Started |                                                                                                                            |
+| 021 | [Load Tests](tasks/021-load-tests.md)                                             | ⬜ Not Started |                                                                                                                            |
 
 ---
 
@@ -53,7 +53,7 @@ Infrastructure, database, Redis, auth, error handling, and health checks.
 | ----------------------------- | ------ |
 | 001 Project Setup             | ✅     |
 | 002 Docker Compose            | ✅     |
-| 003 Database & Entities       | ⬜     |
+| 003 Database & Entities       | ✅     |
 | 004 Redis & Redlock           | ⬜     |
 | 005 JWT Auth Guard            | ⬜     |
 | 006 Error Handling (RFC 7807) | ⬜     |
@@ -98,7 +98,8 @@ Unit tests, integration tests, and load tests.
 
 ## Changelog
 
-| Date       | Task | Change                                                                                                                                                                               |
-| ---------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 2026-02-13 | 001  | ✅ Completed — Project initialized with NestJS, all dependencies installed, config/validation/API prefix set up                                                                      |
-| 2026-02-13 | 002  | ✅ Completed — Dockerfile (multi-stage), docker-compose.yml with 7 services, stub services (payment/weight/notification), health checks, Redis keyspace notifications, .dockerignore |
+| Date       | Task | Change                                                                                                                                                                                  |
+| ---------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-02-13 | 001  | ✅ Completed — Project initialized with NestJS, all dependencies installed, config/validation/API prefix set up                                                                         |
+| 2026-02-13 | 002  | ✅ Completed — Dockerfile (multi-stage), docker-compose.yml with 7 services, stub services (payment/weight/notification), health checks, Redis keyspace notifications, .dockerignore    |
+| 2026-02-13 | 003  | ✅ Completed — TypeORM DataSource config, 8 entities (AircraftType, Flight, Passenger, Seat, CheckIn, Waitlist, AuditLog, AbuseEvent), all indexes per PRD §2.3, migration, seed script |
