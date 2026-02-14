@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
+import { HttpModule } from "@nestjs/axios";
 import { CheckIn } from "./check-in.entity";
 import { Seat } from "../seat/seat.entity";
 import { Flight } from "../flight/flight.entity";
@@ -13,6 +14,7 @@ import { SeatModule } from "../seat/seat.module";
   imports: [
     TypeOrmModule.forFeature([CheckIn, Seat, Flight, AuditLog]),
     SeatModule,
+    HttpModule,
   ],
   controllers: [CheckInController],
   providers: [CheckInService, HoldExpiryService],

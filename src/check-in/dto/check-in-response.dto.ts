@@ -1,4 +1,4 @@
-import { CheckInStatus } from '../../common/types/enums';
+import { CheckInStatus } from "../../common/types/enums";
 
 /**
  * Response DTO for a check-in record.
@@ -13,5 +13,7 @@ export class CheckInResponseDto {
   readonly excessFee!: string | null;
   readonly paymentId!: string | null;
   readonly holdExpiresAt!: Date | null;
+  readonly confirmedAt!: Date | null;
+  readonly message!: string | null;
   readonly createdAt!: Date;
 }
