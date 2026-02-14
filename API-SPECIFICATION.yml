@@ -1,0 +1,958 @@
+openapi: 3.0.3
+info:
+  title: SkyHigh Core – Digital Check-In System API
+  description: |
+    REST API for the SkyHigh Airlines digital self-service check-in system.
+    Handles seat selection, time-bound holds, baggage validation, payment gating,
+    waitlist management, and abuse detection under high-concurrency conditions.
+
+    ## Authentication
+    All endpoints (except `/health` and `/metrics`) require a valid JWT in the
+    `Authorization: Bearer <token>` header. The JWT is validated but not issued
+    by this service (external IdP).
+
+    **JWT Claims:**
+    | Claim | Type   | Description        |
+    |-------|--------|--------------------|
+    | sub   | string | Passenger UUID     |
+    | iat   | number | Issued-at (epoch)  |
+    | exp   | number | Expiration (epoch) |
+
+    ## Error Format
+    All error responses follow the **RFC 7807 Problem Details** specification
+    with `Content-Type: application/problem+json`.
+  version: 1.0.0
+  contact:
+    name: SkyHigh Core Team
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: Health
+    description: Liveness and readiness probes
+  - name: Flights
+    description: Read-only flight resources (pre-seeded)
+  - name: Seat Map
+    description: Seat availability for a flight (cached via Redis)
+  - name: Check-In
+    description: Seat hold, baggage validation, payment gating, and confirmation
+  - name: Waitlist
+    description: FIFO waitlist management per flight
+  - name: Metrics
+    description: Prometheus metrics endpoint
+
+paths:
+  # ──────────────────────────────────────────────
+  # Health
+  # ──────────────────────────────────────────────
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Health]
+      summary: Health check
+      description: |
+        Liveness and readiness probe. Verifies connectivity to PostgreSQL and Redis.
+        This endpoint does **not** require authentication.
+      security: []
+      responses:
+        "200":
+          description: All dependencies healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthCheckResponse"
+        "503":
+          description: One or more dependencies unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthCheckResponse"
+
+  # ──────────────────────────────────────────────
+  # Metrics
+  # ──────────────────────────────────────────────
+  /metrics:
+    get:
+      operationId: getMetrics
+      tags: [Metrics]
+      summary: Prometheus metrics
+      description: |
+        Exposes Prometheus-format metrics including default Node.js metrics,
+        request latency, seat contention rate, hold expiry count, waitlist depth,
+        and abuse events. This endpoint does **not** require authentication.
+      security: []
+      responses:
+        "200":
+          description: Prometheus metrics in text format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  # ──────────────────────────────────────────────
+  # Flights
+  # ──────────────────────────────────────────────
+  /api/v1/flights:
+    get:
+      operationId: listFlights
+      tags: [Flights]
+      summary: List flights with pagination
+      description: Returns a paginated list of flights with aircraft type information.
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+      responses:
+        "200":
+          description: Paginated list of flights
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedFlightsResponse"
+              example:
+                data:
+                  - id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    flightNumber: "SH-1042"
+                    departureTime: "2026-02-14T10:30:00Z"
+                    status: "SCHEDULED"
+                    aircraftType:
+                      id: "f1e2d3c4-b5a6-7890-fedc-ba0987654321"
+                      name: "A320"
+                      rows: 30
+                      columns: "A,B,C,D,E,F"
+                meta:
+                  page: 1
+                  limit: 10
+                  totalItems: 5
+                  totalPages: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/flights/{flightId}:
+    get:
+      operationId: getFlightById
+      tags: [Flights]
+      summary: Get flight details
+      description: Returns a single flight by its UUID including aircraft type information.
+      parameters:
+        - $ref: "#/components/parameters/FlightIdParam"
+      responses:
+        "200":
+          description: Flight details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlightResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FlightNotFound"
+
+  # ──────────────────────────────────────────────
+  # Seat Map
+  # ──────────────────────────────────────────────
+  /api/v1/flights/{flightId}/seats:
+    get:
+      operationId: getSeatMap
+      tags: [Seat Map]
+      summary: Get seat map with availability
+      description: |
+        Returns the full seat map for a flight with real-time availability status.
+        This is the most frequently accessed endpoint. Responses are cached in Redis
+        with a short TTL (~2s) and invalidated on any seat state change.
+
+        **Rate Limiting:** If a single source IP exceeds 50 requests within a 2-second
+        sliding window, a `429 Too Many Requests` response is returned.
+      parameters:
+        - $ref: "#/components/parameters/FlightIdParam"
+      responses:
+        "200":
+          description: Seat map with availability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeatMapResponse"
+              example:
+                flightId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                aircraft: "A320"
+                seats:
+                  - id: "11111111-1111-1111-1111-111111111111"
+                    row: 1
+                    column: "A"
+                    status: "AVAILABLE"
+                  - id: "22222222-2222-2222-2222-222222222222"
+                    row: 1
+                    column: "B"
+                    status: "HELD"
+                  - id: "33333333-3333-3333-3333-333333333333"
+                    row: 1
+                    column: "C"
+                    status: "CONFIRMED"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FlightNotFound"
+        "429":
+          $ref: "#/components/responses/RateLimitExceeded"
+
+  # ──────────────────────────────────────────────
+  # Check-In
+  # ──────────────────────────────────────────────
+  /api/v1/check-ins:
+    post:
+      operationId: startCheckIn
+      tags: [Check-In]
+      summary: Start check-in (select seat and hold)
+      description: |
+        Initiates the check-in process by selecting a seat and placing a time-bound hold.
+        The hold lasts **120 seconds**. During this window, the passenger must confirm
+        check-in (optionally adding baggage). If the hold expires, the seat is automatically
+        released back to the availability pool or assigned to the next waitlisted passenger.
+
+        **Concurrency:** Uses Redis distributed locks (Redlock) and CAS (compare-and-swap)
+        pattern to guarantee exactly one passenger holds a seat at any time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartCheckInRequest"
+            example:
+              flightId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+              seatId: "11111111-1111-1111-1111-111111111111"
+      responses:
+        "201":
+          description: Check-in started, seat held for 120 seconds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckInResponse"
+              example:
+                id: "cccccccc-cccc-cccc-cccc-cccccccccccc"
+                passengerId: "pppppppp-pppp-pppp-pppp-pppppppppppp"
+                flightId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                seatId: "11111111-1111-1111-1111-111111111111"
+                status: "IN_PROGRESS"
+                holdExpiresAt: "2026-02-14T15:20:00Z"
+                createdAt: "2026-02-14T15:18:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FlightNotFound"
+        "409":
+          description: Seat already held or passenger already checked in
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                seatAlreadyHeld:
+                  summary: Seat is held by another passenger
+                  value:
+                    type: "https://skyhigh.com/problems/seat-already-held"
+                    title: "Seat Already Held"
+                    status: 409
+                    detail: "Seat 12A on flight SH-1042 is currently held by another passenger."
+                    instance: "/api/v1/check-ins"
+                alreadyCheckedIn:
+                  summary: Passenger already has an active check-in
+                  value:
+                    type: "https://skyhigh.com/problems/already-checked-in"
+                    title: "Already Checked In"
+                    status: 409
+                    detail: "Passenger already has an active check-in for this flight."
+                    instance: "/api/v1/check-ins"
+
+  /api/v1/check-ins/{checkInId}:
+    get:
+      operationId: getCheckInStatus
+      tags: [Check-In]
+      summary: Get check-in status
+      description: Returns the current status and details of a check-in record.
+      parameters:
+        - $ref: "#/components/parameters/CheckInIdParam"
+      responses:
+        "200":
+          description: Check-in details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckInResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/CheckInNotFound"
+
+    patch:
+      operationId: updateCheckIn
+      tags: [Check-In]
+      summary: Update check-in (add baggage and confirm)
+      description: |
+        Updates the check-in to add baggage weight and/or confirm.
+
+        **Baggage Validation Flow:**
+        1. If `baggageWeight` ≤ 25 kg → check-in is confirmed directly.
+        2. If `baggageWeight` > 25 kg:
+           - Excess fee is calculated: `(weight - 25) × EXCESS_FEE_PER_KG`.
+           - Status transitions to `AWAITING_PAYMENT`.
+           - Payment Service is called synchronously.
+           - On successful payment → status transitions to `COMPLETED`.
+           - On payment failure/timeout → remains `AWAITING_PAYMENT` (passenger can retry).
+
+        The hold timer (120s) continues during this process. If the hold expires before
+        confirmation, the check-in fails with `410 Gone`.
+      parameters:
+        - $ref: "#/components/parameters/CheckInIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCheckInRequest"
+            example:
+              baggageWeight: 28.5
+              action: "CONFIRM"
+      responses:
+        "200":
+          description: Check-in updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckInResponse"
+              examples:
+                confirmed:
+                  summary: Check-in completed (no excess baggage)
+                  value:
+                    id: "cccccccc-cccc-cccc-cccc-cccccccccccc"
+                    status: "COMPLETED"
+                    seatId: "11111111-1111-1111-1111-111111111111"
+                    baggageWeight: 20.0
+                    excessFee: null
+                    confirmedAt: "2026-02-14T15:19:30Z"
+                awaitingPayment:
+                  summary: Excess baggage fee requires payment
+                  value:
+                    id: "cccccccc-cccc-cccc-cccc-cccccccccccc"
+                    status: "AWAITING_PAYMENT"
+                    baggageWeight: 28.5
+                    excessFee: 35.00
+                    message: "Excess baggage fee of 35.00 must be paid to complete check-in."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/CheckInNotFound"
+        "410":
+          description: Hold has expired
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://skyhigh.com/problems/hold-expired"
+                title: "Hold Expired"
+                status: 410
+                detail: "The seat hold has expired. Please select a new seat."
+                instance: "/api/v1/check-ins/cccccccc-cccc-cccc-cccc-cccccccccccc"
+
+    delete:
+      operationId: cancelCheckIn
+      tags: [Check-In]
+      summary: Cancel check-in
+      description: |
+        Cancels a confirmed or in-progress check-in. The freed seat is immediately
+        made available or assigned to the next waitlisted passenger (FIFO).
+
+        Cancellation is **not allowed** after the flight has departed.
+      parameters:
+        - $ref: "#/components/parameters/CheckInIdParam"
+      responses:
+        "200":
+          description: Check-in cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckInCancelledResponse"
+              example:
+                id: "cccccccc-cccc-cccc-cccc-cccccccccccc"
+                status: "CANCELLED"
+                cancelledAt: "2026-02-14T16:00:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Cancellation not allowed (flight departed)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://skyhigh.com/problems/cancellation-not-allowed"
+                title: "Cancellation Not Allowed"
+                status: 403
+                detail: "Cannot cancel check-in after the flight has departed."
+                instance: "/api/v1/check-ins/cccccccc-cccc-cccc-cccc-cccccccccccc"
+        "404":
+          $ref: "#/components/responses/CheckInNotFound"
+
+  # ──────────────────────────────────────────────
+  # Waitlist
+  # ──────────────────────────────────────────────
+  /api/v1/flights/{flightId}/waitlist:
+    post:
+      operationId: joinWaitlist
+      tags: [Waitlist]
+      summary: Join waitlist for a flight
+      description: |
+        Adds the authenticated passenger to the waitlist for the specified flight.
+        Position is assigned in FIFO order. When a seat becomes available (via
+        cancellation or hold expiry), the system automatically assigns it to the
+        next eligible waitlisted passenger and notifies them.
+
+        The auto-assigned passenger receives a new 120-second hold window. If that
+        hold expires, the seat goes back to the waitlist (next FIFO), **not** to
+        general availability.
+      parameters:
+        - $ref: "#/components/parameters/FlightIdParam"
+      responses:
+        "201":
+          description: Successfully joined waitlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitlistResponse"
+              example:
+                id: "wwwwwwww-wwww-wwww-wwww-wwwwwwwwwwww"
+                flightId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                passengerId: "pppppppp-pppp-pppp-pppp-pppppppppppp"
+                position: 3
+                status: "WAITING"
+                createdAt: "2026-02-14T15:25:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FlightNotFound"
+        "409":
+          description: Passenger already on waitlist for this flight
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://skyhigh.com/problems/already-on-waitlist"
+                title: "Already On Waitlist"
+                status: 409
+                detail: "Passenger is already on the waitlist for this flight."
+                instance: "/api/v1/flights/a1b2c3d4-e5f6-7890-abcd-ef1234567890/waitlist"
+
+    get:
+      operationId: getFlightWaitlist
+      tags: [Waitlist]
+      summary: Get waitlist status for a flight
+      description: Returns the current waitlist entries for a flight ordered by FIFO position.
+      parameters:
+        - $ref: "#/components/parameters/FlightIdParam"
+      responses:
+        "200":
+          description: Waitlist entries for the flight
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WaitlistResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FlightNotFound"
+
+  /api/v1/waitlist/{waitlistId}:
+    delete:
+      operationId: leaveWaitlist
+      tags: [Waitlist]
+      summary: Leave waitlist
+      description: Removes the passenger from the waitlist. Only allowed if status is `WAITING`.
+      parameters:
+        - $ref: "#/components/parameters/WaitlistIdParam"
+      responses:
+        "200":
+          description: Successfully removed from waitlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitlistResponse"
+              example:
+                id: "wwwwwwww-wwww-wwww-wwww-wwwwwwwwwwww"
+                flightId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                passengerId: "pppppppp-pppp-pppp-pppp-pppppppppppp"
+                position: 3
+                status: "CANCELLED"
+                createdAt: "2026-02-14T15:25:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Waitlist entry not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+
+# ════════════════════════════════════════════════
+# Components
+# ════════════════════════════════════════════════
+components:
+  # ── Security ──────────────────────────────────
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT issued by an external IdP. Claims: `sub` (passenger UUID), `iat`, `exp`.
+
+  # ── Parameters ────────────────────────────────
+  parameters:
+    FlightIdParam:
+      name: flightId
+      in: path
+      required: true
+      description: UUID of the flight
+      schema:
+        type: string
+        format: uuid
+
+    CheckInIdParam:
+      name: checkInId
+      in: path
+      required: true
+      description: UUID of the check-in record
+      schema:
+        type: string
+        format: uuid
+
+    WaitlistIdParam:
+      name: waitlistId
+      in: path
+      required: true
+      description: UUID of the waitlist entry
+      schema:
+        type: string
+        format: uuid
+
+    PageParam:
+      name: page
+      in: query
+      required: false
+      description: Page number (1-indexed)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      description: Number of items per page
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+
+  # ── Schemas ───────────────────────────────────
+  schemas:
+    # ── Enums ─────────────────────────────────
+    FlightStatus:
+      type: string
+      enum: [SCHEDULED, BOARDING, DEPARTED, CANCELLED]
+      description: Current status of a flight
+
+    SeatStatus:
+      type: string
+      enum: [AVAILABLE, HELD, CONFIRMED, CANCELLED]
+      description: |
+        Seat lifecycle: AVAILABLE → HELD → CONFIRMED → CANCELLED → AVAILABLE
+
+    CheckInStatus:
+      type: string
+      enum: [IN_PROGRESS, AWAITING_PAYMENT, COMPLETED, CANCELLED]
+      description: Status of a check-in process
+
+    WaitlistStatus:
+      type: string
+      enum: [WAITING, ASSIGNED, EXPIRED, CANCELLED]
+      description: Status of a waitlist entry
+
+    # ── Flight DTOs ───────────────────────────
+    AircraftTypeResponse:
+      type: object
+      required: [id, name, rows, columns]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Aircraft model name (e.g., "A320", "B737")
+          example: "A320"
+        rows:
+          type: integer
+          description: Number of seat rows
+          example: 30
+        columns:
+          type: string
+          description: Column identifiers as CSV
+          example: "A,B,C,D,E,F"
+
+    FlightResponse:
+      type: object
+      required: [id, flightNumber, departureTime, status, aircraftType]
+      properties:
+        id:
+          type: string
+          format: uuid
+        flightNumber:
+          type: string
+          description: Flight number
+          example: "SH-1042"
+        departureTime:
+          type: string
+          format: date-time
+          description: Scheduled departure time (ISO 8601)
+        status:
+          $ref: "#/components/schemas/FlightStatus"
+        aircraftType:
+          $ref: "#/components/schemas/AircraftTypeResponse"
+
+    PaginationMeta:
+      type: object
+      required: [page, limit, totalItems, totalPages]
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 10
+        totalItems:
+          type: integer
+          example: 5
+        totalPages:
+          type: integer
+          example: 1
+
+    PaginatedFlightsResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlightResponse"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    # ── Seat DTOs ─────────────────────────────
+    SeatResponse:
+      type: object
+      required: [id, row, column, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        row:
+          type: integer
+          description: Seat row number (1-based)
+          example: 1
+        column:
+          type: string
+          description: Seat column letter
+          example: "A"
+        status:
+          $ref: "#/components/schemas/SeatStatus"
+
+    SeatMapResponse:
+      type: object
+      required: [flightId, aircraft, seats]
+      properties:
+        flightId:
+          type: string
+          format: uuid
+        aircraft:
+          type: string
+          description: Aircraft type name
+          example: "A320"
+        seats:
+          type: array
+          items:
+            $ref: "#/components/schemas/SeatResponse"
+
+    # ── Check-In DTOs ─────────────────────────
+    StartCheckInRequest:
+      type: object
+      required: [flightId, seatId]
+      properties:
+        flightId:
+          type: string
+          format: uuid
+          description: UUID of the flight to check in for
+        seatId:
+          type: string
+          format: uuid
+          description: UUID of the seat to hold
+
+    UpdateCheckInRequest:
+      type: object
+      required: [action]
+      properties:
+        baggageWeight:
+          type: number
+          format: double
+          description: Baggage weight in kilograms
+          example: 28.5
+        action:
+          type: string
+          enum: [CONFIRM]
+          description: Action to perform on the check-in
+
+    CheckInResponse:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        passengerId:
+          type: string
+          format: uuid
+        flightId:
+          type: string
+          format: uuid
+        seatId:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          $ref: "#/components/schemas/CheckInStatus"
+        baggageWeight:
+          type: number
+          format: double
+          nullable: true
+          description: Baggage weight in kg
+        excessFee:
+          type: number
+          format: double
+          nullable: true
+          description: Calculated excess baggage fee
+        paymentId:
+          type: string
+          nullable: true
+          description: External payment reference ID
+        holdExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the seat hold expires (hold start + 120s)
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when check-in was confirmed
+        message:
+          type: string
+          nullable: true
+          description: Human-readable status message (e.g., payment instructions)
+        createdAt:
+          type: string
+          format: date-time
+
+    CheckInCancelledResponse:
+      type: object
+      required: [id, status, cancelledAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [CANCELLED]
+        cancelledAt:
+          type: string
+          format: date-time
+
+    # ── Waitlist DTOs ─────────────────────────
+    WaitlistResponse:
+      type: object
+      required: [id, flightId, passengerId, position, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        flightId:
+          type: string
+          format: uuid
+        passengerId:
+          type: string
+          format: uuid
+        position:
+          type: integer
+          description: FIFO position in the waitlist (1-based)
+          example: 3
+        status:
+          $ref: "#/components/schemas/WaitlistStatus"
+        createdAt:
+          type: string
+          format: date-time
+
+    # ── Error Schemas ─────────────────────────
+    ProblemDetails:
+      type: object
+      description: RFC 7807 Problem Details error response
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: A URI reference that identifies the problem type
+          example: "https://skyhigh.com/problems/seat-already-held"
+        title:
+          type: string
+          description: Short human-readable summary of the problem type
+          example: "Seat Already Held"
+        status:
+          type: integer
+          description: HTTP status code
+          example: 409
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence
+          example: "Seat 12A on flight SH-1042 is currently held by another passenger."
+        instance:
+          type: string
+          description: URI reference of the specific occurrence (request path)
+          example: "/api/v1/check-ins"
+
+    # ── Health Schemas ────────────────────────
+    HealthCheckResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+          description: Overall health status
+        info:
+          type: object
+          description: Healthy dependency details
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [up, down]
+        error:
+          type: object
+          description: Unhealthy dependency details
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [up, down]
+        details:
+          type: object
+          description: Combined dependency details
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [up, down]
+
+  # ── Reusable Responses ────────────────────────
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://skyhigh.com/problems/bad-request"
+            title: "Bad Request"
+            status: 400
+            detail: "page must not be less than 1"
+            instance: "/api/v1/flights"
+
+    Unauthorized:
+      description: Missing or invalid JWT
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://skyhigh.com/problems/unauthorized"
+            title: "Unauthorized"
+            status: 401
+            detail: "Missing or invalid authentication token."
+            instance: "/api/v1/flights"
+
+    FlightNotFound:
+      description: Flight not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://skyhigh.com/problems/flight-not-found"
+            title: "Flight Not Found"
+            status: 404
+            detail: "No flight found with the given ID."
+            instance: "/api/v1/flights/00000000-0000-0000-0000-000000000000"
+
+    CheckInNotFound:
+      description: Check-in not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://skyhigh.com/problems/checkin-not-found"
+            title: "Check-In Not Found"
+            status: 404
+            detail: "No check-in record found with the given ID."
+            instance: "/api/v1/check-ins/00000000-0000-0000-0000-000000000000"
+
+    RateLimitExceeded:
+      description: Rate limit exceeded (abuse detection)
+      headers:
+        Retry-After:
+          description: Seconds until the client can retry
+          schema:
+            type: integer
+            example: 2
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://skyhigh.com/problems/rate-limit-exceeded"
+            title: "Rate Limit Exceeded"
+            status: 429
+            detail: "Too many requests. Please wait before retrying."
+            instance: "/api/v1/flights/a1b2c3d4-e5f6-7890-abcd-ef1234567890/seats"
+
+# ── Global Security ───────────────────────────
+security:
+  - BearerAuth: []

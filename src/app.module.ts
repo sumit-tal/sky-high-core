@@ -10,6 +10,7 @@ import { JwtAuthGuard } from "./common/guards";
 import { RedisModule } from "./common/redis";
 import { HealthModule } from "./health/health.module";
 import { FlightModule } from "./flight/flight.module";
+import { SeatModule } from "./seat/seat.module";
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { FlightModule } from "./flight/flight.module";
     RedisModule,
     HealthModule,
     FlightModule,
+    SeatModule,
   ],
   providers: [
     {
