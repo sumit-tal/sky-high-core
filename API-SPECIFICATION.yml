@@ -40,6 +40,8 @@ tags:
     description: Seat hold, baggage validation, payment gating, and confirmation
   - name: Waitlist
     description: FIFO waitlist management per flight
+  - name: Notifications
+    description: Internal notification events sent to the stub Notification Service
   - name: Metrics
     description: Prometheus metrics endpoint
 
@@ -894,6 +896,64 @@ components:
           type: string
           nullable: true
           description: Error message on failure (null on success)
+
+    # ── Notification DTOs ────────────────────
+    NotificationEventType:
+      type: string
+      enum: [WAITLIST_SEAT_ASSIGNED, HOLD_EXPIRY_WARNING]
+      description: Types of notification events sent to the Notification Service
+
+    NotificationRequest:
+      type: object
+      description: Request payload sent to the stub Notification Service (fire-and-forget)
+      required: [type, passengerId, payload]
+      properties:
+        type:
+          $ref: "#/components/schemas/NotificationEventType"
+        passengerId:
+          type: string
+          format: uuid
+          description: UUID of the passenger to notify
+        payload:
+          type: object
+          description: Event-specific payload data
+          additionalProperties: true
+          properties:
+            flightId:
+              type: string
+              format: uuid
+              description: UUID of the flight
+            seatId:
+              type: string
+              format: uuid
+              description: UUID of the assigned seat
+            waitlistEntryId:
+              type: string
+              format: uuid
+              description: UUID of the waitlist entry
+
+    NotificationResponse:
+      type: object
+      description: Response from the stub Notification Service
+      required: [notificationId, type, passengerId, status, timestamp]
+      properties:
+        notificationId:
+          type: string
+          description: Unique notification identifier
+          example: "notif_1707912345678"
+        type:
+          $ref: "#/components/schemas/NotificationEventType"
+        passengerId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          description: Notification acceptance status
+          example: "accepted"
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp when the notification was accepted
 
     # ── Waitlist DTOs ─────────────────────────
     WaitlistResponse:

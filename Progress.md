@@ -8,9 +8,9 @@
 
 | Status         | Count  |
 | -------------- | ------ |
-| ✅ Completed   | 13     |
+| ✅ Completed   | 14     |
 | 🔧 In Progress | 0      |
-| ⬜ Not Started | 8      |
+| ⬜ Not Started | 7      |
 | **Total**      | **21** |
 
 ---
@@ -33,7 +33,7 @@
 | 012 | [Check-In: Confirm & Cancel](tasks/012-checkin-confirm-and-cancel.md)             | ✅ Completed   | CheckInController (GET/PATCH/DELETE /api/v1/check-ins/:id), confirm flow (baggage validation, payment gating), cancel flow (flight departure check, waitlist trigger), DTOs, HttpModule, 52 unit tests                                                                                                                                                                                   |
 | 013 | [Baggage & Payment Modules](tasks/013-baggage-and-payment-modules.md)             | ✅ Completed   | BaggageModule (BaggageService, weight validation via stub, fee calculation), PaymentModule (PaymentService, exponential backoff retry, timeout, audit logging), CheckInService refactored to delegate to BaggageService/PaymentService, DTOs, env vars (PAYMENT_TIMEOUT_MS, PAYMENT_MAX_RETRIES, PAYMENT_INITIAL_BACKOFF_MS, WEIGHT_SERVICE_TIMEOUT_MS), API spec updated, 49 unit tests |
 | 014 | [Waitlist Module](tasks/014-waitlist-module.md)                                   | ✅ Completed   | WaitlistModule, WaitlistController (POST/GET/DELETE), WaitlistService (FIFO join, leave, get, auto-assignment via Redlock), HoldExpiryService integration (waitlist hold expiry → EXPIRED + re-trigger), WaitlistNotFoundException, DTOs, audit logging (WAITLIST_JOINED, WAITLIST_ASSIGNED), notification event, 24 unit tests                                                          |
-| 015 | [Notification Module](tasks/015-notification-module.md)                           | ⬜ Not Started |                                                                                                                                                                                                                                                                                                                                                                                          |
+| 015 | [Notification Module](tasks/015-notification-module.md)                           | ✅ Completed   | NotificationModule, NotificationService (HTTP client to stub, fire-and-forget pattern), @OnEvent(WAITLIST_NOTIFICATION_EVENT) listener, DTOs (NotificationEventType, NotificationRequest, NotificationResponse), NOTIFICATION_TIMEOUT_MS env config, API spec updated, 9 unit tests                                                                                                      |
 | 016 | [Audit Module](tasks/016-audit-module.md)                                         | ⬜ Not Started |                                                                                                                                                                                                                                                                                                                                                                                          |
 | 017 | [Rate Limiter & Abuse Detection](tasks/017-rate-limiter-abuse-detection.md)       | ⬜ Not Started |                                                                                                                                                                                                                                                                                                                                                                                          |
 | 018 | [Observability](tasks/018-observability.md)                                       | ⬜ Not Started |                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -70,9 +70,9 @@ Flight, seat map, check-in, waitlist, baggage, payment, notifications, and audit
 | 010 Check-In: Seat Hold        | ✅     |
 | 011 Hold Expiry                | ✅     |
 | 012 Check-In: Confirm & Cancel | ✅     |
-| 013 Baggage & Payment          | ⬜     |
+| 013 Baggage & Payment          | ✅     |
 | 014 Waitlist Module            | ✅     |
-| 015 Notification Module        | ⬜     |
+| 015 Notification Module        | ✅     |
 | 016 Audit Module               | ⬜     |
 
 ### Phase 3 — Security & Observability (Tasks 017–018)
@@ -113,3 +113,4 @@ Unit tests, integration tests, and load tests.
 | 2026-02-14 | 011  | ✅ Completed — HoldExpiryService (dual-mechanism): Redis keyspace notification listener (primary, @OnEvent), @Cron background sweep every 30s (fallback), shared CAS release logic (Redlock + DB transaction), check-in → CANCELLED, audit log (SEAT_RELEASED), seat map cache invalidation, @nestjs/schedule + ScheduleModule, 15 unit tests                                  |
 | 2026-02-14 | 012  | ✅ Completed — CheckInController (GET/PATCH/DELETE), confirmCheckIn (hold validation, weight service call, excess baggage fee calc, payment service call with timeout+retry, AWAITING_PAYMENT flow), cancelCheckIn (flight departure check, seat release, waitlist event trigger), getCheckIn, UpdateCheckInRequestDto, CheckInCancelledResponseDto, HttpModule, 52 unit tests |
 | 2026-02-14 | 014  | ✅ Completed — WaitlistModule, WaitlistController (POST join, GET status, DELETE leave), WaitlistService (FIFO queue, Redlock auto-assignment, CAS seat hold, audit logging), HoldExpiryService integration (waitlist hold expiry → EXPIRED + re-trigger FIFO), WaitlistNotFoundException, WaitlistResponseDto, notification event emission, API spec updated, 24 unit tests   |
+| 2026-02-14 | 015  | ✅ Completed — NotificationModule, NotificationService (HTTP client to stub Notification Service, fire-and-forget pattern), @OnEvent(WAITLIST_NOTIFICATION_EVENT) listener, DTOs (NotificationEventType, NotificationRequest, NotificationResponse), NOTIFICATION_TIMEOUT_MS env config, API spec updated with notification schemas, 9 unit tests                              |

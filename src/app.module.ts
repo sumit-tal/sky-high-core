@@ -14,6 +14,7 @@ import { FlightModule } from "./flight/flight.module";
 import { SeatModule } from "./seat/seat.module";
 import { CheckInModule } from "./check-in/check-in.module";
 import { WaitlistModule } from "./waitlist/waitlist.module";
+import { NotificationModule } from "./notification/notification.module";
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { WaitlistModule } from "./waitlist/waitlist.module";
     SeatModule,
     CheckInModule,
     WaitlistModule,
+    NotificationModule,
   ],
   providers: [
     {
