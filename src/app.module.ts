@@ -11,6 +11,7 @@ import { RedisModule } from "./common/redis";
 import { HealthModule } from "./health/health.module";
 import { FlightModule } from "./flight/flight.module";
 import { SeatModule } from "./seat/seat.module";
+import { CheckInModule } from "./check-in/check-in.module";
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { SeatModule } from "./seat/seat.module";
     HealthModule,
     FlightModule,
     SeatModule,
+    CheckInModule,
   ],
   providers: [
     {

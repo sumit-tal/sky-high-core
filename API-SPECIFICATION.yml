@@ -247,7 +247,28 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          $ref: "#/components/responses/FlightNotFound"
+          description: Flight or seat not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                flightNotFound:
+                  summary: Flight does not exist
+                  value:
+                    type: "https://skyhigh.com/problems/flight-not-found"
+                    title: "Flight Not Found"
+                    status: 404
+                    detail: "Flight with id 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' was not found"
+                    instance: "/api/v1/check-ins"
+                seatNotFound:
+                  summary: Seat does not exist on the flight
+                  value:
+                    type: "https://skyhigh.com/problems/seat-not-found"
+                    title: "Seat Not Found"
+                    status: 404
+                    detail: "Seat with id '11111111-1111-1111-1111-111111111111' was not found on flight 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'"
+                    instance: "/api/v1/check-ins"
         "409":
           description: Seat already held or passenger already checked in
           content:
@@ -261,7 +282,7 @@ paths:
                     type: "https://skyhigh.com/problems/seat-already-held"
                     title: "Seat Already Held"
                     status: 409
-                    detail: "Seat 12A on flight SH-1042 is currently held by another passenger."
+                    detail: "Seat with id '11111111-1111-1111-1111-111111111111' is not available"
                     instance: "/api/v1/check-ins"
                 alreadyCheckedIn:
                   summary: Passenger already has an active check-in
@@ -933,6 +954,19 @@ components:
             status: 404
             detail: "No check-in record found with the given ID."
             instance: "/api/v1/check-ins/00000000-0000-0000-0000-000000000000"
+
+    SeatNotFound:
+      description: Seat not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://skyhigh.com/problems/seat-not-found"
+            title: "Seat Not Found"
+            status: 404
+            detail: "The requested seat was not found."
+            instance: "/api/v1/check-ins"
 
     RateLimitExceeded:
       description: Rate limit exceeded (abuse detection)
