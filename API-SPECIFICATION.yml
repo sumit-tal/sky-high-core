@@ -536,11 +536,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          description: Waitlist entry not found
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ProblemDetails"
+          $ref: "#/components/responses/WaitlistNotFound"
 
 # ════════════════════════════════════════════════
 # Components
@@ -1053,6 +1049,19 @@ components:
             status: 404
             detail: "The requested seat was not found."
             instance: "/api/v1/check-ins"
+
+    WaitlistNotFound:
+      description: Waitlist entry not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://skyhigh.com/problems/waitlist-not-found"
+            title: "Waitlist Entry Not Found"
+            status: 404
+            detail: "No waitlist entry found with the given ID."
+            instance: "/api/v1/waitlist/00000000-0000-0000-0000-000000000000"
 
     RateLimitExceeded:
       description: Rate limit exceeded (abuse detection)

@@ -1,10 +1,11 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { OnEvent } from "@nestjs/event-emitter";
+import { EventEmitter2, OnEvent } from "@nestjs/event-emitter";
 import { Cron } from "@nestjs/schedule";
 import { InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
 import { Seat } from "../seat/seat.entity";
 import { CheckIn } from "./check-in.entity";
+import { Waitlist } from "../waitlist/waitlist.entity";
 import { AuditLog } from "../audit/audit-log.entity";
 import { SeatService } from "../seat/seat.service";
 import {
@@ -13,8 +14,14 @@ import {
   SEAT_HOLD_EXPIRED_EVENT,
   type SeatHoldExpiredEvent,
 } from "../common/redis";
-import { SeatStatus, CheckInStatus, AuditAction } from "../common/types/enums";
+import {
+  SeatStatus,
+  CheckInStatus,
+  WaitlistStatus,
+  AuditAction,
+} from "../common/types/enums";
 import { REDIS_TTL } from "../common/redis";
+import { WAITLIST_PROCESS_EVENT } from "./check-in.service";
 
 const LOCK_TTL_MS = REDIS_TTL.SEAT_LOCK * 1000;
 const HOLD_DURATION_SECONDS = REDIS_TTL.SEAT_HOLD;
@@ -33,9 +40,12 @@ export class HoldExpiryService {
   constructor(
     @InjectRepository(Seat)
     private readonly seatRepository: Repository<Seat>,
+    @InjectRepository(Waitlist)
+    private readonly waitlistRepository: Repository<Waitlist>,
     private readonly dataSource: DataSource,
     private readonly redisService: RedisService,
     private readonly seatService: SeatService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -144,10 +154,41 @@ export class HoldExpiryService {
       );
       return false;
     }
+    await this.markWaitlistEntryExpired(seat.flightId, passengerId);
     await this.seatService.invalidateCache(seat.flightId);
+    this.eventEmitter.emit(WAITLIST_PROCESS_EVENT, {
+      flightId: seat.flightId,
+      seatId,
+    });
     this.logger.log(
       `Seat ${seatId} released (hold expired) on flight ${seat.flightId}`,
     );
     return true;
+  }
+
+  /**
+   * If the expired hold was from a waitlist assignment, mark the entry as EXPIRED.
+   */
+  private async markWaitlistEntryExpired(
+    flightId: string,
+    passengerId: string | null,
+  ): Promise<void> {
+    if (!passengerId) {
+      return;
+    }
+    const entry = await this.waitlistRepository.findOne({
+      where: {
+        flightId,
+        passengerId,
+        status: WaitlistStatus.ASSIGNED,
+      },
+    });
+    if (entry) {
+      entry.status = WaitlistStatus.EXPIRED;
+      await this.waitlistRepository.save(entry);
+      this.logger.log(
+        `Waitlist entry '${entry.id}' expired for passenger '${passengerId}' on flight '${flightId}'`,
+      );
+    }
   }
 }

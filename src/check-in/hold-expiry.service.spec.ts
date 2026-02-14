@@ -1,9 +1,11 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { getRepositoryToken } from "@nestjs/typeorm";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { DataSource, Repository, SelectQueryBuilder } from "typeorm";
 import { HoldExpiryService } from "./hold-expiry.service";
 import { Seat } from "../seat/seat.entity";
 import { CheckIn } from "./check-in.entity";
+import { Waitlist } from "../waitlist/waitlist.entity";
 import { AuditLog } from "../audit/audit-log.entity";
 import { SeatService } from "../seat/seat.service";
 import { RedisService } from "../common/redis";
@@ -89,6 +91,19 @@ describe("HoldExpiryService", () => {
           provide: SeatService,
           useValue: {
             invalidateCache: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(Waitlist),
+          useValue: {
+            findOne: jest.fn(),
+            save: jest.fn(),
+          },
+        },
+        {
+          provide: EventEmitter2,
+          useValue: {
+            emit: jest.fn(),
           },
         },
       ],

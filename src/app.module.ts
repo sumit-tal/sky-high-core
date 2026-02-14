@@ -13,6 +13,7 @@ import { HealthModule } from "./health/health.module";
 import { FlightModule } from "./flight/flight.module";
 import { SeatModule } from "./seat/seat.module";
 import { CheckInModule } from "./check-in/check-in.module";
+import { WaitlistModule } from "./waitlist/waitlist.module";
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { CheckInModule } from "./check-in/check-in.module";
     FlightModule,
     SeatModule,
     CheckInModule,
+    WaitlistModule,
   ],
   providers: [
     {
