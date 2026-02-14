@@ -9,6 +9,7 @@ import { envValidationSchema } from "./common/config/env.validation";
 import { JwtAuthGuard } from "./common/guards";
 import { RedisModule } from "./common/redis";
 import { HealthModule } from "./health/health.module";
+import { FlightModule } from "./flight/flight.module";
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { HealthModule } from "./health/health.module";
     }),
     RedisModule,
     HealthModule,
+    FlightModule,
   ],
   providers: [
     {

@@ -8,9 +8,9 @@
 
 | Status         | Count  |
 | -------------- | ------ |
-| ✅ Completed   | 7      |
+| ✅ Completed   | 8      |
 | 🔧 In Progress | 0      |
-| ⬜ Not Started | 14     |
+| ⬜ Not Started | 13     |
 | **Total**      | **21** |
 
 ---
@@ -26,7 +26,7 @@
 | 005 | [JWT Authentication Guard](tasks/005-auth-jwt-guard.md)                           | ✅ Completed   | JWT guard (global via APP_GUARD), @Public decorator, @CurrentUser decorator, test JWT utility, 9 unit tests                |
 | 006 | [Global Exception Filter (RFC 7807)](tasks/006-global-error-handling.md)          | ✅ Completed   | Global exception filter (catches all), RFC 7807 ProblemDetails, 10 domain exceptions, error type constants, 25 unit tests  |
 | 007 | [Health Check Module](tasks/007-health-module.md)                                 | ✅ Completed   | @nestjs/terminus, TypeORM + Redis health indicators, @Public endpoint, 8 unit tests                                        |
-| 008 | [Flight Module](tasks/008-flight-module.md)                                       | ⬜ Not Started |                                                                                                                            |
+| 008 | [Flight Module](tasks/008-flight-module.md)                                       | ✅ Completed   | FlightController, FlightService, response DTOs, pagination, RFC 7807 404, 10 unit tests                                    |
 | 009 | [Seat Map Module](tasks/009-seat-map-module.md)                                   | ⬜ Not Started |                                                                                                                            |
 | 010 | [Check-In: Seat Hold](tasks/010-checkin-hold-seat.md)                             | ⬜ Not Started |                                                                                                                            |
 | 011 | [Hold Expiry Mechanism](tasks/011-hold-expiry-mechanism.md)                       | ⬜ Not Started |                                                                                                                            |
@@ -65,7 +65,7 @@ Flight, seat map, check-in, waitlist, baggage, payment, notifications, and audit
 
 | Task                           | Status |
 | ------------------------------ | ------ |
-| 008 Flight Module              | ⬜     |
+| 008 Flight Module              | ✅     |
 | 009 Seat Map Module            | ⬜     |
 | 010 Check-In: Seat Hold        | ⬜     |
 | 011 Hold Expiry                | ⬜     |
@@ -107,3 +107,4 @@ Unit tests, integration tests, and load tests.
 | 2026-02-14 | 005  | ✅ Completed — JwtAuthGuard (global via APP_GUARD), @Public decorator for public routes, @CurrentUser param decorator, Express type augmentation, JwtModule registration, generateTestJwt utility, 9 unit tests                                                 |
 | 2026-02-14 | 006  | ✅ Completed — Global exception filter (@Catch() all), RFC 7807 ProblemDetails format, 10 domain exception classes, error type constants, TypeORM error handling, Content-Type application/problem+json, 25 unit tests                                          |
 | 2026-02-14 | 007  | ✅ Completed — @nestjs/terminus health checks, TypeOrmHealthIndicator (PostgreSQL), custom RedisHealthIndicator (PING), @Public decorator, GET /health returns 200/503, 8 unit tests                                                                            |
+| 2026-02-14 | 008  | ✅ Completed — FlightModule (read-only), FlightController, FlightService, PaginationQueryDto, FlightResponseDto, AircraftTypeResponseDto, PaginatedFlightsResponseDto, RFC 7807 flight-not-found 404, 10 unit tests                                             |
