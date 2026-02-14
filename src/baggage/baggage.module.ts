@@ -1,4 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module } from "@nestjs/common";
+import { HttpModule } from "@nestjs/axios";
+import { BaggageService } from "./baggage.service";
 
-@Module({})
+@Module({
+  imports: [HttpModule],
+  providers: [BaggageService],
+  exports: [BaggageService],
+})
 export class BaggageModule {}

@@ -1,12 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { HttpService } from "@nestjs/axios";
-import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { DataSource, Repository } from "typeorm";
-import { firstValueFrom } from "rxjs";
-import { timeout, retry } from "rxjs/operators";
-import { AxiosResponse } from "axios";
 import { CheckIn } from "./check-in.entity";
 import { Seat } from "../seat/seat.entity";
 import { Flight } from "../flight/flight.entity";
@@ -19,6 +14,8 @@ import {
 } from "./dto";
 import { RedisService, RedisKey, REDIS_TTL } from "../common/redis";
 import { SeatService } from "../seat/seat.service";
+import { BaggageService } from "../baggage/baggage.service";
+import { PaymentService } from "../payment/payment.service";
 import {
   SeatStatus,
   CheckInStatus,
@@ -37,10 +34,6 @@ import {
 
 const LOCK_TTL_MS = REDIS_TTL.SEAT_LOCK * 1000;
 const HOLD_TTL_SECONDS = REDIS_TTL.SEAT_HOLD;
-const DEFAULT_MAX_BAGGAGE_KG = 25;
-const DEFAULT_EXCESS_FEE_PER_KG = 10;
-const HTTP_TIMEOUT_MS = 5000;
-const HTTP_RETRY_COUNT = 2;
 
 export const WAITLIST_PROCESS_EVENT = "waitlist.process";
 
@@ -57,11 +50,6 @@ export const WAITLIST_PROCESS_EVENT = "waitlist.process";
 export class CheckInService {
   private readonly logger = new Logger(CheckInService.name);
 
-  private readonly maxBaggageKg: number;
-  private readonly excessFeePerKg: number;
-  private readonly weightServiceUrl: string;
-  private readonly paymentServiceUrl: string;
-
   constructor(
     @InjectRepository(CheckIn)
     private readonly checkInRepository: Repository<CheckIn>,
@@ -72,31 +60,10 @@ export class CheckInService {
     private readonly dataSource: DataSource,
     private readonly redisService: RedisService,
     private readonly seatService: SeatService,
-    private readonly httpService: HttpService,
-    private readonly configService: ConfigService,
+    private readonly baggageService: BaggageService,
+    private readonly paymentService: PaymentService,
     private readonly eventEmitter: EventEmitter2,
-  ) {
-    this.maxBaggageKg = Number(
-      this.configService.get<string>(
-        "MAX_BAGGAGE_WEIGHT_KG",
-        String(DEFAULT_MAX_BAGGAGE_KG),
-      ),
-    );
-    this.excessFeePerKg = Number(
-      this.configService.get<string>(
-        "EXCESS_FEE_PER_KG",
-        String(DEFAULT_EXCESS_FEE_PER_KG),
-      ),
-    );
-    this.weightServiceUrl = this.configService.get<string>(
-      "WEIGHT_SERVICE_URL",
-      "http://localhost:3002",
-    );
-    this.paymentServiceUrl = this.configService.get<string>(
-      "PAYMENT_SERVICE_URL",
-      "http://localhost:3001",
-    );
-  }
+  ) {}
 
   /**
    * Start check-in by holding a seat for the passenger.
@@ -253,9 +220,16 @@ export class CheckInService {
     const checkIn = await this.findCheckInOrThrow(checkInId, passengerId);
     await this.validateHoldNotExpired(checkIn);
     const baggageWeight = dto.baggageWeight ?? 0;
-    await this.validateBaggageWeight(passengerId, baggageWeight);
-    if (baggageWeight > this.maxBaggageKg) {
-      return this.handleExcessBaggage({ checkIn, baggageWeight });
+    const baggageResult = await this.baggageService.validateAndCalculateFee({
+      passengerId,
+      declaredWeight: baggageWeight,
+    });
+    if (baggageResult.isOverweight) {
+      return this.handleExcessBaggage({
+        checkIn,
+        baggageWeight,
+        excessFee: baggageResult.excessFee,
+      });
     }
     return this.completeCheckIn({ checkIn, baggageWeight, paymentId: null });
   }
@@ -368,34 +342,15 @@ export class CheckInService {
     }
   }
 
-  private async validateBaggageWeight(
-    passengerId: string,
-    baggageWeight: number,
-  ): Promise<void> {
-    try {
-      await firstValueFrom(
-        this.httpService
-          .get(`${this.weightServiceUrl}/api/v1/baggage/weight/${passengerId}`)
-          .pipe(timeout(HTTP_TIMEOUT_MS)),
-      );
-    } catch (error) {
-      this.logger.warn(
-        `Weight service validation failed for passenger '${passengerId}', proceeding with declared weight: ${baggageWeight}kg`,
-      );
-    }
-  }
-
   private async handleExcessBaggage({
     checkIn,
     baggageWeight,
+    excessFee,
   }: {
     checkIn: CheckIn;
     baggageWeight: number;
+    excessFee: number;
   }): Promise<CheckInResponseDto> {
-    const excessFee =
-      Math.round(
-        (baggageWeight - this.maxBaggageKg) * this.excessFeePerKg * 100,
-      ) / 100;
     await this.checkInRepository.update(
       { id: checkIn.id },
       {
@@ -404,12 +359,13 @@ export class CheckInService {
         excessFee: String(excessFee),
       },
     );
-    const paymentResult = await this.processPayment({
+    const paymentResult = await this.paymentService.processPayment({
       checkInId: checkIn.id,
       passengerId: checkIn.passengerId,
       amount: excessFee,
+      currency: "USD",
     });
-    if (paymentResult) {
+    if (paymentResult.success) {
       return this.completeCheckIn({
         checkIn: {
           ...checkIn,
@@ -429,41 +385,6 @@ export class CheckInService {
       holdExpiresAt,
       message: `Excess baggage fee of ${excessFee.toFixed(2)} must be paid to complete check-in.`,
     });
-  }
-
-  private async processPayment({
-    checkInId,
-    passengerId,
-    amount,
-  }: {
-    checkInId: string;
-    passengerId: string;
-    amount: number;
-  }): Promise<{ transactionId: string } | null> {
-    try {
-      const response: AxiosResponse<{ transactionId: string; status: string }> =
-        await firstValueFrom(
-          this.httpService
-            .post<{
-              transactionId: string;
-              status: string;
-            }>(`${this.paymentServiceUrl}/api/v1/payments`, { passengerId, amount, currency: "USD", checkInId })
-            .pipe(timeout(HTTP_TIMEOUT_MS), retry(HTTP_RETRY_COUNT)),
-        );
-      const { transactionId, status } = response.data;
-      if (status === "confirmed") {
-        this.logger.log(
-          `Payment confirmed for check-in '${checkInId}': txn=${transactionId}`,
-        );
-        return { transactionId };
-      }
-      return null;
-    } catch (error) {
-      this.logger.warn(
-        `Payment failed/timed out for check-in '${checkInId}': ${(error as Error).message}`,
-      );
-      return null;
-    }
   }
 
   private async completeCheckIn({

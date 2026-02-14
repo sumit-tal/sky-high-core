@@ -1,16 +1,15 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { getRepositoryToken } from "@nestjs/typeorm";
-import { HttpService } from "@nestjs/axios";
-import { ConfigService } from "@nestjs/config";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { DataSource, Repository } from "typeorm";
-import { of, throwError } from "rxjs";
 import { CheckInService, WAITLIST_PROCESS_EVENT } from "./check-in.service";
 import { CheckIn } from "./check-in.entity";
 import { Seat } from "../seat/seat.entity";
 import { Flight } from "../flight/flight.entity";
 import { AuditLog } from "../audit/audit-log.entity";
 import { SeatService } from "../seat/seat.service";
+import { BaggageService } from "../baggage/baggage.service";
+import { PaymentService } from "../payment/payment.service";
 import { RedisService } from "../common/redis";
 import {
   FlightNotFoundException,
@@ -100,8 +99,9 @@ describe("CheckInService", () => {
   let flightRepository: jest.Mocked<Repository<Flight>>;
   let redisService: jest.Mocked<RedisService>;
   let seatService: jest.Mocked<SeatService>;
+  let baggageService: jest.Mocked<BaggageService>;
+  let paymentService: jest.Mocked<PaymentService>;
   let dataSource: jest.Mocked<DataSource>;
-  let httpService: jest.Mocked<HttpService>;
   let eventEmitter: jest.Mocked<EventEmitter2>;
 
   beforeEach(async () => {
@@ -155,16 +155,15 @@ describe("CheckInService", () => {
           },
         },
         {
-          provide: HttpService,
+          provide: BaggageService,
           useValue: {
-            get: jest.fn(),
-            post: jest.fn(),
+            validateAndCalculateFee: jest.fn(),
           },
         },
         {
-          provide: ConfigService,
+          provide: PaymentService,
           useValue: {
-            get: jest.fn((_key: string, defaultValue: string) => defaultValue),
+            processPayment: jest.fn(),
           },
         },
         {
@@ -183,7 +182,8 @@ describe("CheckInService", () => {
     dataSource = module.get(DataSource);
     redisService = module.get(RedisService);
     seatService = module.get(SeatService);
-    httpService = module.get(HttpService);
+    baggageService = module.get(BaggageService);
+    paymentService = module.get(PaymentService);
     eventEmitter = module.get(EventEmitter2);
   });
 
@@ -459,9 +459,13 @@ describe("CheckInService", () => {
     it("When valid confirm with no excess baggage, Then completes check-in", async () => {
       checkInRepository.findOne.mockResolvedValue(mockCheckIn as CheckIn);
       redisService.exists.mockResolvedValue(true);
-      httpService.get.mockReturnValue(
-        of({ data: { weight: 20 }, status: 200 } as any),
-      );
+      baggageService.validateAndCalculateFee.mockResolvedValue({
+        weight: 20,
+        maxAllowedWeight: 25,
+        isOverweight: false,
+        excessWeight: 0,
+        excessFee: 0,
+      });
       mockTransactionManager.update.mockResolvedValue({ affected: 1 });
       mockTransactionManager.create.mockReturnValue({});
       mockTransactionManager.save.mockResolvedValue({});
@@ -523,16 +527,20 @@ describe("CheckInService", () => {
     it("When excess baggage and payment succeeds, Then completes check-in with paymentId", async () => {
       checkInRepository.findOne.mockResolvedValue(mockCheckIn as CheckIn);
       redisService.exists.mockResolvedValue(true);
-      httpService.get.mockReturnValue(
-        of({ data: { weight: 30 }, status: 200 } as any),
-      );
+      baggageService.validateAndCalculateFee.mockResolvedValue({
+        weight: 30,
+        maxAllowedWeight: 25,
+        isOverweight: true,
+        excessWeight: 5,
+        excessFee: 50,
+      });
       checkInRepository.update.mockResolvedValue({ affected: 1 } as any);
-      httpService.post.mockReturnValue(
-        of({
-          data: { transactionId: "txn_123", status: "confirmed" },
-          status: 201,
-        } as any),
-      );
+      paymentService.processPayment.mockResolvedValue({
+        success: true,
+        transactionId: "txn_123",
+        status: "confirmed",
+        errorMessage: null,
+      });
       mockTransactionManager.update.mockResolvedValue({ affected: 1 });
       mockTransactionManager.create.mockReturnValue({});
       mockTransactionManager.save.mockResolvedValue({});
@@ -559,13 +567,20 @@ describe("CheckInService", () => {
     it("When excess baggage and payment fails, Then returns AWAITING_PAYMENT with message", async () => {
       checkInRepository.findOne.mockResolvedValue(mockCheckIn as CheckIn);
       redisService.exists.mockResolvedValue(true);
-      httpService.get.mockReturnValue(
-        of({ data: { weight: 30 }, status: 200 } as any),
-      );
+      baggageService.validateAndCalculateFee.mockResolvedValue({
+        weight: 30,
+        maxAllowedWeight: 25,
+        isOverweight: true,
+        excessWeight: 5,
+        excessFee: 50,
+      });
       checkInRepository.update.mockResolvedValue({ affected: 1 } as any);
-      httpService.post.mockReturnValue(
-        throwError(() => new Error("Payment timeout")),
-      );
+      paymentService.processPayment.mockResolvedValue({
+        success: false,
+        transactionId: null,
+        status: "failed",
+        errorMessage: "Payment timeout",
+      });
       checkInRepository.findOneOrFail.mockResolvedValue({
         ...mockCheckIn,
         status: CheckInStatus.AWAITING_PAYMENT,
@@ -584,9 +599,13 @@ describe("CheckInService", () => {
     it("When confirm completes, Then deletes Redis hold key and invalidates cache", async () => {
       checkInRepository.findOne.mockResolvedValue(mockCheckIn as CheckIn);
       redisService.exists.mockResolvedValue(true);
-      httpService.get.mockReturnValue(
-        of({ data: { weight: 20 }, status: 200 } as any),
-      );
+      baggageService.validateAndCalculateFee.mockResolvedValue({
+        weight: 20,
+        maxAllowedWeight: 25,
+        isOverweight: false,
+        excessWeight: 0,
+        excessFee: 0,
+      });
       mockTransactionManager.update.mockResolvedValue({ affected: 1 });
       mockTransactionManager.create.mockReturnValue({});
       mockTransactionManager.save.mockResolvedValue({});
@@ -611,9 +630,13 @@ describe("CheckInService", () => {
     it("When confirm completes, Then creates SEAT_CONFIRMED and CHECKIN_COMPLETED audit logs", async () => {
       checkInRepository.findOne.mockResolvedValue(mockCheckIn as CheckIn);
       redisService.exists.mockResolvedValue(true);
-      httpService.get.mockReturnValue(
-        of({ data: { weight: 20 }, status: 200 } as any),
-      );
+      baggageService.validateAndCalculateFee.mockResolvedValue({
+        weight: 20,
+        maxAllowedWeight: 25,
+        isOverweight: false,
+        excessWeight: 0,
+        excessFee: 0,
+      });
       mockTransactionManager.update.mockResolvedValue({ affected: 1 });
       mockTransactionManager.create.mockReturnValue({});
       mockTransactionManager.save.mockResolvedValue({});

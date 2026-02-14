@@ -826,6 +826,79 @@ components:
           type: string
           format: date-time
 
+    # ── Baggage & Payment DTOs ─────────────────
+    BaggageValidationResult:
+      type: object
+      description: Result of baggage weight validation and fee calculation
+      required: [weight, maxAllowedWeight, isOverweight, excessWeight, excessFee]
+      properties:
+        weight:
+          type: number
+          format: double
+          description: Declared baggage weight in kg
+          example: 28.5
+        maxAllowedWeight:
+          type: number
+          format: double
+          description: Maximum allowed baggage weight in kg (configurable via MAX_BAGGAGE_WEIGHT_KG)
+          example: 25
+        isOverweight:
+          type: boolean
+          description: Whether the baggage exceeds the maximum allowed weight
+          example: true
+        excessWeight:
+          type: number
+          format: double
+          description: Weight exceeding the maximum allowed (0 if not overweight)
+          example: 3.5
+        excessFee:
+          type: number
+          format: double
+          description: "Calculated excess fee: excessWeight × EXCESS_FEE_PER_KG (0 if not overweight)"
+          example: 35.00
+
+    PaymentRequest:
+      type: object
+      description: Request payload sent to the Payment Service
+      required: [passengerId, amount, currency, checkInId]
+      properties:
+        passengerId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: double
+          description: Payment amount (excess baggage fee)
+          example: 35.00
+        currency:
+          type: string
+          description: ISO 4217 currency code
+          example: USD
+        checkInId:
+          type: string
+          format: uuid
+
+    PaymentResult:
+      type: object
+      description: Result of a payment attempt (never throws on failure)
+      required: [success, transactionId, status, errorMessage]
+      properties:
+        success:
+          type: boolean
+          description: Whether the payment was confirmed
+        transactionId:
+          type: string
+          nullable: true
+          description: External payment reference ID (null on failure)
+        status:
+          type: string
+          description: Payment status (e.g., confirmed, failed, pending)
+          example: confirmed
+        errorMessage:
+          type: string
+          nullable: true
+          description: Error message on failure (null on success)
+
     # ── Waitlist DTOs ─────────────────────────
     WaitlistResponse:
       type: object
