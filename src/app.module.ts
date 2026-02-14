@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { JwtModule } from "@nestjs/jwt";
+import { ScheduleModule } from "@nestjs/schedule";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { LoggerModule } from "nestjs-pino";
 import { PrometheusModule } from "@willsoto/nestjs-prometheus";
@@ -54,6 +55,7 @@ import { CheckInModule } from "./check-in/check-in.module";
         signOptions: { expiresIn: "1h" },
       }),
     }),
+    ScheduleModule.forRoot(),
     RedisModule,
     HealthModule,
     FlightModule,

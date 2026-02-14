@@ -218,6 +218,19 @@ paths:
 
         **Concurrency:** Uses Redis distributed locks (Redlock) and CAS (compare-and-swap)
         pattern to guarantee exactly one passenger holds a seat at any time.
+
+        **Hold Expiry (Automatic):**
+        Seat holds are automatically released after 120 seconds via a dual-mechanism system:
+        1. **Primary — Redis Keyspace Notifications:** The `hold:{seatId}` Redis key is set
+           with a 120s TTL. On expiry, a keyspace notification triggers immediate seat release.
+        2. **Fallback — Background Sweep:** A cron job runs every 30 seconds (configurable via
+           `SWEEP_INTERVAL_SECONDS`) and queries for any seats where `status = HELD` and
+           `held_at + 120s < NOW()`, releasing them if found.
+
+        Both mechanisms use the same CAS (compare-and-swap) release logic to guarantee
+        **at-most-once** semantics — a seat is never double-released. On release, the
+        associated check-in record transitions to `CANCELLED`, an audit log entry
+        (`SEAT_RELEASED`) is created, and the seat map cache is invalidated.
       requestBody:
         required: true
         content:

@@ -6,6 +6,7 @@ import { Flight } from "../flight/flight.entity";
 import { AuditLog } from "../audit/audit-log.entity";
 import { CheckInController } from "./check-in.controller";
 import { CheckInService } from "./check-in.service";
+import { HoldExpiryService } from "./hold-expiry.service";
 import { SeatModule } from "../seat/seat.module";
 
 @Module({
@@ -14,7 +15,7 @@ import { SeatModule } from "../seat/seat.module";
     SeatModule,
   ],
   controllers: [CheckInController],
-  providers: [CheckInService],
-  exports: [CheckInService],
+  providers: [CheckInService, HoldExpiryService],
+  exports: [CheckInService, HoldExpiryService],
 })
 export class CheckInModule {}
