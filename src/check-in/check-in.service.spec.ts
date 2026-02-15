@@ -6,11 +6,13 @@ import { CheckInService, WAITLIST_PROCESS_EVENT } from "./check-in.service";
 import { CheckIn } from "./check-in.entity";
 import { Seat } from "../seat/seat.entity";
 import { Flight } from "../flight/flight.entity";
-import { AuditLog } from "../audit/audit-log.entity";
+import { AuditService } from "../audit/audit.service";
 import { SeatService } from "../seat/seat.service";
 import { BaggageService } from "../baggage/baggage.service";
 import { PaymentService } from "../payment/payment.service";
 import { RedisService } from "../common/redis";
+import { MetricsService } from "../common/observability";
+import { createMockMetricsService } from "../common/observability/metrics.service.mock";
 import {
   FlightNotFoundException,
   SeatNotFoundException,
@@ -103,6 +105,7 @@ describe("CheckInService", () => {
   let paymentService: jest.Mocked<PaymentService>;
   let dataSource: jest.Mocked<DataSource>;
   let eventEmitter: jest.Mocked<EventEmitter2>;
+  let auditService: jest.Mocked<AuditService>;
 
   beforeEach(async () => {
     mockTransactionManager.update.mockReset();
@@ -172,6 +175,17 @@ describe("CheckInService", () => {
             emit: jest.fn(),
           },
         },
+        {
+          provide: AuditService,
+          useValue: {
+            log: jest.fn(),
+            logWithTransaction: jest.fn().mockResolvedValue({}),
+          },
+        },
+        {
+          provide: MetricsService,
+          useValue: createMockMetricsService(),
+        },
       ],
     }).compile();
 
@@ -185,6 +199,7 @@ describe("CheckInService", () => {
     baggageService = module.get(BaggageService);
     paymentService = module.get(PaymentService);
     eventEmitter = module.get(EventEmitter2);
+    auditService = module.get(AuditService);
   });
 
   describe("startCheckIn", () => {
@@ -306,15 +321,17 @@ describe("CheckInService", () => {
       redisService.setSeatHold.mockResolvedValue(undefined);
       seatService.invalidateCache.mockResolvedValue(undefined);
       await service.startCheckIn({ passengerId: PASSENGER_ID, dto: mockDto });
-      expect(mockTransactionManager.create).toHaveBeenCalledWith(
-        AuditLog,
+      expect(auditService.logWithTransaction).toHaveBeenCalledWith(
         expect.objectContaining({
-          entityType: "seat",
-          entityId: SEAT_ID,
-          action: AuditAction.SEAT_HELD,
-          fromState: SeatStatus.AVAILABLE,
-          toState: SeatStatus.HELD,
-          actorId: PASSENGER_ID,
+          manager: mockTransactionManager,
+          dto: expect.objectContaining({
+            entityType: "seat",
+            entityId: SEAT_ID,
+            action: AuditAction.SEAT_HELD,
+            fromState: SeatStatus.AVAILABLE,
+            toState: SeatStatus.HELD,
+            actorId: PASSENGER_ID,
+          }),
         }),
       );
     });
@@ -654,19 +671,21 @@ describe("CheckInService", () => {
         passengerId: PASSENGER_ID,
         dto: { action: CheckInAction.CONFIRM, baggageWeight: 20 },
       });
-      expect(mockTransactionManager.create).toHaveBeenCalledWith(
-        AuditLog,
+      expect(auditService.logWithTransaction).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: AuditAction.SEAT_CONFIRMED,
-          fromState: SeatStatus.HELD,
-          toState: SeatStatus.CONFIRMED,
+          dto: expect.objectContaining({
+            action: AuditAction.SEAT_CONFIRMED,
+            fromState: SeatStatus.HELD,
+            toState: SeatStatus.CONFIRMED,
+          }),
         }),
       );
-      expect(mockTransactionManager.create).toHaveBeenCalledWith(
-        AuditLog,
+      expect(auditService.logWithTransaction).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: AuditAction.CHECKIN_COMPLETED,
-          toState: CheckInStatus.COMPLETED,
+          dto: expect.objectContaining({
+            action: AuditAction.CHECKIN_COMPLETED,
+            toState: CheckInStatus.COMPLETED,
+          }),
         }),
       );
     });
@@ -768,18 +787,20 @@ describe("CheckInService", () => {
         checkInId: CHECKIN_ID,
         passengerId: PASSENGER_ID,
       });
-      expect(mockTransactionManager.create).toHaveBeenCalledWith(
-        AuditLog,
+      expect(auditService.logWithTransaction).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: AuditAction.SEAT_CANCELLED,
-          toState: SeatStatus.AVAILABLE,
+          dto: expect.objectContaining({
+            action: AuditAction.SEAT_CANCELLED,
+            toState: SeatStatus.AVAILABLE,
+          }),
         }),
       );
-      expect(mockTransactionManager.create).toHaveBeenCalledWith(
-        AuditLog,
+      expect(auditService.logWithTransaction).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: AuditAction.CHECKIN_CANCELLED,
-          toState: CheckInStatus.CANCELLED,
+          dto: expect.objectContaining({
+            action: AuditAction.CHECKIN_CANCELLED,
+            toState: CheckInStatus.CANCELLED,
+          }),
         }),
       );
     });

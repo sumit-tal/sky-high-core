@@ -6,7 +6,7 @@ import { DataSource, Repository } from "typeorm";
 import { Seat } from "../seat/seat.entity";
 import { CheckIn } from "./check-in.entity";
 import { Waitlist } from "../waitlist/waitlist.entity";
-import { AuditLog } from "../audit/audit-log.entity";
+import { AuditService } from "../audit/audit.service";
 import { SeatService } from "../seat/seat.service";
 import {
   RedisService,
@@ -14,6 +14,7 @@ import {
   SEAT_HOLD_EXPIRED_EVENT,
   type SeatHoldExpiredEvent,
 } from "../common/redis";
+import { MetricsService } from "../common/observability";
 import {
   SeatStatus,
   CheckInStatus,
@@ -46,6 +47,8 @@ export class HoldExpiryService {
     private readonly redisService: RedisService,
     private readonly seatService: SeatService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly auditService: AuditService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   /**
@@ -55,7 +58,12 @@ export class HoldExpiryService {
   @OnEvent(SEAT_HOLD_EXPIRED_EVENT)
   async handleHoldExpired(event: SeatHoldExpiredEvent): Promise<void> {
     this.logger.log(`Keyspace expiry received for seat: ${event.seatId}`);
-    await this.releaseSeat(event.seatId);
+    const released = await this.releaseSeat(event.seatId);
+    if (released) {
+      this.metricsService.holdExpiryTotal
+        .labels({ flight_id: "unknown", mechanism: "keyspace" })
+        .inc();
+    }
   }
 
   /**
@@ -75,7 +83,12 @@ export class HoldExpiryService {
     }
     this.logger.log(`Sweep found ${staleSeats.length} stale hold(s)`);
     for (const seat of staleSeats) {
-      await this.releaseSeat(seat.id);
+      const released = await this.releaseSeat(seat.id);
+      if (released) {
+        this.metricsService.holdExpiryTotal
+          .labels({ flight_id: seat.flightId, mechanism: "sweep" })
+          .inc();
+      }
     }
   }
 
@@ -136,16 +149,18 @@ export class HoldExpiryService {
         { seatId, status: CheckInStatus.IN_PROGRESS },
         { status: CheckInStatus.CANCELLED },
       );
-      const auditLog = manager.create(AuditLog, {
-        entityType: "seat",
-        entityId: seatId,
-        action: AuditAction.SEAT_RELEASED,
-        fromState: SeatStatus.HELD,
-        toState: SeatStatus.AVAILABLE,
-        actorId: passengerId ?? SYSTEM_ACTOR_ID,
-        metadata: { reason: "hold_expired", flightId: seat.flightId },
+      await this.auditService.logWithTransaction({
+        manager,
+        dto: {
+          entityType: "seat",
+          entityId: seatId,
+          action: AuditAction.SEAT_RELEASED,
+          fromState: SeatStatus.HELD,
+          toState: SeatStatus.AVAILABLE,
+          actorId: passengerId ?? SYSTEM_ACTOR_ID,
+          metadata: { reason: "hold_expired", flightId: seat.flightId },
+        },
       });
-      await manager.save(AuditLog, auditLog);
       return true;
     });
     if (!updateResult) {

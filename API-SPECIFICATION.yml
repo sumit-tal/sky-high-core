@@ -21,6 +21,30 @@ info:
     ## Error Format
     All error responses follow the **RFC 7807 Problem Details** specification
     with `Content-Type: application/problem+json`.
+
+    ## Testing
+    Comprehensive unit tests cover all services, guards, middleware, and utility
+    functions using **Jest** with mocked dependencies. Test naming follows the
+    `When_<condition>_Then_<expected>` convention.
+
+    **Unit Test Coverage (23 suites, 255 tests):**
+
+    | Module | Tests | Key Scenarios |
+    |--------|-------|---------------|
+    | SeatService | 8 | Cache hit/miss, flight 404, cache invalidation |
+    | CheckInService | 26 | Seat hold, CAS, already held 409, already checked in 409, hold expired 410, baggage under/over limit, payment success/failure, cancel before/after departure |
+    | HoldExpiryService | 17 | Keyspace expiry, CAS release, double-release no-op, waitlist trigger, waitlist entry EXPIRED marking |
+    | WaitlistService | 14 | FIFO join, already on waitlist 409, auto-assignment, no waiting passengers, CAS failure, waitlist-assigned hold expiry re-trigger |
+    | BaggageService | 10 | Under/over limit fee calc, weight service fallback |
+    | PaymentService | 10 | Success, timeout, retry with exponential backoff, non-confirmed status |
+    | RateLimiterMiddleware | 11 | Under/at threshold, 429 response, abuse event recording, window reset |
+    | JwtAuthGuard | 9 | Valid/expired/missing token, public routes, wrong secret |
+    | AuditService | 8 | Fire-and-forget log, transactional log, error handling |
+    | AbuseEventService | 7 | Record event, daily cleanup, retention days |
+    | NotificationService | 9 | Fire-and-forget HTTP, timeout handling, error logging |
+    | Controllers & Others | 126 | Controller delegation, exception filter, health checks, Redis, metrics, logging interceptor |
+
+    Run all tests: `npm run test`
   version: 1.0.0
   contact:
     name: SkyHigh Core Team
@@ -42,6 +66,8 @@ tags:
     description: FIFO waitlist management per flight
   - name: Notifications
     description: Internal notification events sent to the stub Notification Service
+  - name: Audit
+    description: Append-only audit logging and abuse event recording (internal)
   - name: Metrics
     description: Prometheus metrics endpoint
 
@@ -81,9 +107,30 @@ paths:
       tags: [Metrics]
       summary: Prometheus metrics
       description: |
-        Exposes Prometheus-format metrics including default Node.js metrics,
-        request latency, seat contention rate, hold expiry count, waitlist depth,
-        and abuse events. This endpoint does **not** require authentication.
+        Exposes Prometheus-format metrics including default Node.js metrics
+        and the following custom business metrics. This endpoint does **not**
+        require authentication.
+
+        **Custom Metrics (Technical PRD §10.2):**
+
+        | Metric | Type | Labels | Description |
+        |--------|------|--------|-------------|
+        | `skyhigh_seat_map_requests_total` | Counter | `flight_id`, `status` | Seat map requests (cache hit/miss) |
+        | `skyhigh_seat_hold_duration_seconds` | Histogram | `flight_id` | Time a seat is held before confirm/expiry |
+        | `skyhigh_seat_contention_total` | Counter | `flight_id`, `seat_id` | Seat hold contention events |
+        | `skyhigh_hold_expiry_total` | Counter | `flight_id`, `mechanism` | Hold expiry events (keyspace/sweep) |
+        | `skyhigh_checkin_duration_seconds` | Histogram | `flight_id`, `status` | End-to-end check-in duration |
+        | `skyhigh_waitlist_depth` | Gauge | `flight_id` | Current waitlist depth per flight |
+        | `skyhigh_waitlist_assignment_total` | Counter | `flight_id` | Waitlist-to-seat assignments |
+        | `skyhigh_abuse_events_total` | Counter | `source_ip` | Rate-limit abuse detections |
+        | `skyhigh_payment_request_duration_seconds` | Histogram | `status` | Payment service call latency |
+        | `skyhigh_http_request_duration_seconds` | Histogram | `method`, `path`, `status` | HTTP request duration |
+
+        **Distributed Tracing (OpenTelemetry):**
+        - Auto-instrumented: HTTP requests, TypeORM queries, Redis commands
+        - Manual spans: seat hold acquisition, waitlist processing, payment calls
+        - Trace context propagated to stub services via `traceparent` header
+        - All structured logs include `traceId`, `spanId`, and `requestId` fields
       security: []
       responses:
         "200":
@@ -954,6 +1001,103 @@ components:
           type: string
           format: date-time
           description: Timestamp when the notification was accepted
+
+    # ── Audit DTOs ───────────────────────────
+    AuditAction:
+      type: string
+      enum:
+        - SEAT_HELD
+        - SEAT_CONFIRMED
+        - SEAT_RELEASED
+        - SEAT_CANCELLED
+        - WAITLIST_JOINED
+        - WAITLIST_ASSIGNED
+        - CHECKIN_STARTED
+        - CHECKIN_COMPLETED
+        - CHECKIN_CANCELLED
+        - PAYMENT_REQUESTED
+        - PAYMENT_CONFIRMED
+        - ABUSE_DETECTED
+      description: Type of auditable state transition
+
+    AuditLogEntry:
+      type: object
+      description: |
+        Append-only audit log entry recording a state transition.
+        Created by AuditService for every seat, check-in, waitlist, and payment state change.
+        Audit logging is non-blocking (fire-and-forget) for non-transactional writes,
+        or atomic within the same DB transaction for transactional writes.
+      required: [id, entityType, entityId, action, toState, actorId, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        entityType:
+          type: string
+          description: "Type of entity (e.g., seat, check_in, waitlist, payment)"
+          example: "seat"
+        entityId:
+          type: string
+          format: uuid
+          description: UUID of the entity being audited
+        action:
+          $ref: "#/components/schemas/AuditAction"
+        fromState:
+          type: string
+          nullable: true
+          description: State before the transition (null for initial states)
+          example: "AVAILABLE"
+        toState:
+          type: string
+          description: State after the transition
+          example: "HELD"
+        actorId:
+          type: string
+          format: uuid
+          description: UUID of the actor (passenger or system 00000000-0000-0000-0000-000000000000)
+        metadata:
+          type: object
+          nullable: true
+          description: Additional context (flightId, checkInId, seatId, etc.)
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+
+    AbuseEvent:
+      type: object
+      description: |
+        Immutable record of a detected rate-limit abuse event.
+        Records older than ABUSE_RETENTION_DAYS (default 90) are cleaned up daily.
+      required: [id, sourceIp, requestCount, windowStart, windowEnd, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sourceIp:
+          type: string
+          description: Source IP address that triggered the abuse detection
+          example: "192.168.1.100"
+        requestCount:
+          type: integer
+          description: Number of requests in the sliding window
+          example: 55
+        windowStart:
+          type: string
+          format: date-time
+          description: Start of the rate-limit sliding window
+        windowEnd:
+          type: string
+          format: date-time
+          description: End of the rate-limit sliding window
+        details:
+          type: object
+          nullable: true
+          description: Additional context (endpoint, user-agent, etc.)
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
 
     # ── Waitlist DTOs ─────────────────────────
     WaitlistResponse:

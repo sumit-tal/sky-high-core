@@ -1,11 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Seat } from './seat.entity';
-import { Flight } from '../flight/flight.entity';
-import { FlightNotFoundException } from '../common/filters/exceptions';
-import { RedisService, RedisKey } from '../common/redis';
-import { SeatMapResponseDto, SeatResponseDto } from './dto';
+import { Injectable, Logger } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { Seat } from "./seat.entity";
+import { Flight } from "../flight/flight.entity";
+import { FlightNotFoundException } from "../common/filters/exceptions";
+import { RedisService, RedisKey } from "../common/redis";
+import { MetricsService } from "../common/observability";
+import { SeatMapResponseDto, SeatResponseDto } from "./dto";
 
 /**
  * Service for seat map retrieval with Redis caching.
@@ -21,6 +22,7 @@ export class SeatService {
     @InjectRepository(Flight)
     private readonly flightRepository: Repository<Flight>,
     private readonly redisService: RedisService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   /**
@@ -32,22 +34,33 @@ export class SeatService {
     const cached = await this.redisService.getSeatMapCache(cacheKey);
     if (cached) {
       this.logger.debug(`Cache hit for seat map: ${flightId}`);
+      this.metricsService.seatMapRequestsTotal
+        .labels({ flight_id: flightId, status: "success" })
+        .inc();
       return JSON.parse(cached) as SeatMapResponseDto;
     }
     this.logger.debug(`Cache miss for seat map: ${flightId}`);
     const flight = await this.flightRepository.findOne({
       where: { id: flightId },
-      relations: ['aircraftType'],
+      relations: ["aircraftType"],
     });
     if (!flight) {
-      throw new FlightNotFoundException(`Flight with id '${flightId}' was not found`);
+      throw new FlightNotFoundException(
+        `Flight with id '${flightId}' was not found`,
+      );
     }
     const seats = await this.seatRepository.find({
       where: { flightId },
-      order: { row: 'ASC', column: 'ASC' },
+      order: { row: "ASC", column: "ASC" },
     });
     const seatMapResponse = this.toSeatMapResponse(flight, seats);
-    await this.redisService.setSeatMapCache(cacheKey, JSON.stringify(seatMapResponse));
+    await this.redisService.setSeatMapCache(
+      cacheKey,
+      JSON.stringify(seatMapResponse),
+    );
+    this.metricsService.seatMapRequestsTotal
+      .labels({ flight_id: flightId, status: "success" })
+      .inc();
     return seatMapResponse;
   }
 

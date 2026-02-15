@@ -1,12 +1,11 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { HttpService } from "@nestjs/axios";
 import { ConfigService } from "@nestjs/config";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
 import { firstValueFrom } from "rxjs";
 import { timeout } from "rxjs/operators";
 import { AxiosResponse } from "axios";
-import { AuditLog } from "../audit/audit-log.entity";
+import { AuditService } from "../audit/audit.service";
+import { MetricsService, withSpan } from "../common/observability";
 import { AuditAction } from "../common/types/enums";
 import { PaymentRequestDto, PaymentResultDto } from "./dto";
 
@@ -37,8 +36,8 @@ export class PaymentService {
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
-    @InjectRepository(AuditLog)
-    private readonly auditLogRepository: Repository<AuditLog>,
+    private readonly auditService: AuditService,
+    private readonly metricsService: MetricsService,
   ) {
     this.paymentServiceUrl = this.configService.get<string>(
       "PAYMENT_SERVICE_URL",
@@ -75,26 +74,42 @@ export class PaymentService {
     currency,
     checkInId,
   }: PaymentRequestDto): Promise<PaymentResultDto> {
-    await this.createAuditLog({
-      checkInId,
-      passengerId,
+    this.auditService.log({
+      entityType: "payment",
+      entityId: checkInId,
       action: AuditAction.PAYMENT_REQUESTED,
+      fromState: null,
+      toState: "requested",
+      actorId: passengerId,
       metadata: { amount, currency },
     });
     this.logger.log(
       `Payment requested for check-in '${checkInId}': amount=${amount} ${currency}`,
     );
-    const result = await this.callPaymentServiceWithRetry({
-      passengerId,
-      amount,
-      currency,
-      checkInId,
-    });
+    const startTime = Date.now();
+    const result = await withSpan(
+      "payment.process",
+      { checkInId, passengerId, amount, currency },
+      async () =>
+        this.callPaymentServiceWithRetry({
+          passengerId,
+          amount,
+          currency,
+          checkInId,
+        }),
+    );
+    const durationSec = (Date.now() - startTime) / 1000;
+    this.metricsService.paymentRequestDurationSeconds
+      .labels({ status: result.status })
+      .observe(durationSec);
     if (result.success) {
-      await this.createAuditLog({
-        checkInId,
-        passengerId,
+      this.auditService.log({
+        entityType: "payment",
+        entityId: checkInId,
         action: AuditAction.PAYMENT_CONFIRMED,
+        fromState: "requested",
+        toState: "confirmed",
+        actorId: passengerId,
         metadata: {
           amount,
           currency,
@@ -165,29 +180,6 @@ export class PaymentService {
       status: "failed",
       errorMessage: lastError?.message ?? "Payment failed after all retries",
     };
-  }
-
-  private async createAuditLog({
-    checkInId,
-    passengerId,
-    action,
-    metadata,
-  }: {
-    checkInId: string;
-    passengerId: string;
-    action: AuditAction;
-    metadata: Record<string, unknown>;
-  }): Promise<void> {
-    const auditLog = this.auditLogRepository.create({
-      entityType: "payment",
-      entityId: checkInId,
-      action,
-      fromState: null,
-      toState: action === AuditAction.PAYMENT_REQUESTED ? "requested" : "confirmed",
-      actorId: passengerId,
-      metadata,
-    });
-    await this.auditLogRepository.save(auditLog);
   }
 
   private delay(ms: number): Promise<void> {

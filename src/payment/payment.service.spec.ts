@@ -1,11 +1,11 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { HttpService } from "@nestjs/axios";
 import { ConfigService } from "@nestjs/config";
-import { getRepositoryToken } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
 import { of, throwError } from "rxjs";
 import { PaymentService } from "./payment.service";
-import { AuditLog } from "../audit/audit-log.entity";
+import { AuditService } from "../audit/audit.service";
+import { MetricsService } from "../common/observability";
+import { createMockMetricsService } from "../common/observability/metrics.service.mock";
 import { AuditAction } from "../common/types/enums";
 
 const PASSENGER_ID = "passenger-uuid-1";
@@ -22,7 +22,7 @@ const configMap: Record<string, string> = {
 describe("PaymentService", () => {
   let service: PaymentService;
   let httpService: jest.Mocked<HttpService>;
-  let auditLogRepository: jest.Mocked<Repository<AuditLog>>;
+  let auditService: jest.Mocked<AuditService>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -44,17 +44,21 @@ describe("PaymentService", () => {
           },
         },
         {
-          provide: getRepositoryToken(AuditLog),
+          provide: AuditService,
           useValue: {
-            create: jest.fn().mockReturnValue({}),
-            save: jest.fn().mockResolvedValue({}),
+            log: jest.fn(),
+            logWithTransaction: jest.fn().mockResolvedValue({}),
           },
+        },
+        {
+          provide: MetricsService,
+          useValue: createMockMetricsService(),
         },
       ],
     }).compile();
     service = module.get<PaymentService>(PaymentService);
     httpService = module.get(HttpService);
-    auditLogRepository = module.get(getRepositoryToken(AuditLog));
+    auditService = module.get(AuditService);
   });
 
   describe("processPayment", () => {
@@ -90,7 +94,7 @@ describe("PaymentService", () => {
         currency: "USD",
         checkInId: CHECKIN_ID,
       });
-      expect(auditLogRepository.create).toHaveBeenCalledWith(
+      expect(auditService.log).toHaveBeenCalledWith(
         expect.objectContaining({
           entityType: "payment",
           entityId: CHECKIN_ID,
@@ -98,7 +102,7 @@ describe("PaymentService", () => {
           actorId: PASSENGER_ID,
         }),
       );
-      expect(auditLogRepository.create).toHaveBeenCalledWith(
+      expect(auditService.log).toHaveBeenCalledWith(
         expect.objectContaining({
           entityType: "payment",
           entityId: CHECKIN_ID,
@@ -106,7 +110,7 @@ describe("PaymentService", () => {
           actorId: PASSENGER_ID,
         }),
       );
-      expect(auditLogRepository.save).toHaveBeenCalledTimes(2);
+      expect(auditService.log).toHaveBeenCalledTimes(2);
     });
 
     it("When payment fails all retries, Then returns failure without throwing", async () => {
@@ -126,21 +130,19 @@ describe("PaymentService", () => {
     });
 
     it("When payment fails all retries, Then only creates PAYMENT_REQUESTED audit log", async () => {
-      httpService.post.mockReturnValue(
-        throwError(() => new Error("Timeout")),
-      );
+      httpService.post.mockReturnValue(throwError(() => new Error("Timeout")));
       await service.processPayment({
         passengerId: PASSENGER_ID,
         amount: 50,
         currency: "USD",
         checkInId: CHECKIN_ID,
       });
-      expect(auditLogRepository.create).toHaveBeenCalledWith(
+      expect(auditService.log).toHaveBeenCalledWith(
         expect.objectContaining({
           action: AuditAction.PAYMENT_REQUESTED,
         }),
       );
-      expect(auditLogRepository.create).not.toHaveBeenCalledWith(
+      expect(auditService.log).not.toHaveBeenCalledWith(
         expect.objectContaining({
           action: AuditAction.PAYMENT_CONFIRMED,
         }),
@@ -149,9 +151,7 @@ describe("PaymentService", () => {
 
     it("When payment fails then succeeds on retry, Then returns success", async () => {
       httpService.post
-        .mockReturnValueOnce(
-          throwError(() => new Error("Connection refused")),
-        )
+        .mockReturnValueOnce(throwError(() => new Error("Connection refused")))
         .mockReturnValueOnce(
           of({
             data: { transactionId: "txn_456", status: "confirmed" },
@@ -213,9 +213,7 @@ describe("PaymentService", () => {
     });
 
     it("When payment retries exhausted, Then total attempts equals maxRetries + 1", async () => {
-      httpService.post.mockReturnValue(
-        throwError(() => new Error("Timeout")),
-      );
+      httpService.post.mockReturnValue(throwError(() => new Error("Timeout")));
       await service.processPayment({
         passengerId: PASSENGER_ID,
         amount: 50,
@@ -240,6 +238,48 @@ describe("PaymentService", () => {
         checkInId: CHECKIN_ID,
       });
       expect(result.success).toBe(true);
+    });
+
+    it("When payment retries, Then uses exponential backoff with increasing delays", async () => {
+      const delaySpy = jest
+        .spyOn(service as any, "delay")
+        .mockResolvedValue(undefined);
+      httpService.post
+        .mockReturnValueOnce(throwError(() => new Error("Timeout")))
+        .mockReturnValueOnce(throwError(() => new Error("Timeout")))
+        .mockReturnValueOnce(
+          of({
+            data: { transactionId: "txn_backoff", status: "confirmed" },
+            status: 201,
+          } as any),
+        );
+      const result = await service.processPayment({
+        passengerId: PASSENGER_ID,
+        amount: 50,
+        currency: "USD",
+        checkInId: CHECKIN_ID,
+      });
+      expect(result.success).toBe(true);
+      expect(delaySpy).toHaveBeenCalledTimes(2);
+      const firstBackoff = delaySpy.mock.calls[0][0] as number;
+      const secondBackoff = delaySpy.mock.calls[1][0] as number;
+      expect(secondBackoff).toBe(firstBackoff * 2);
+      delaySpy.mockRestore();
+    });
+
+    it("When payment times out on all attempts, Then returns failure with timeout message", async () => {
+      httpService.post.mockReturnValue(
+        throwError(() => new Error("Timeout has occurred")),
+      );
+      const result = await service.processPayment({
+        passengerId: PASSENGER_ID,
+        amount: 50,
+        currency: "USD",
+        checkInId: CHECKIN_ID,
+      });
+      expect(result.success).toBe(false);
+      expect(result.status).toBe("failed");
+      expect(result.errorMessage).toContain("Timeout has occurred");
     });
   });
 });

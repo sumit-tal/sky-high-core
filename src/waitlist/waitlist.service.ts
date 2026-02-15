@@ -7,9 +7,10 @@ import { WaitlistResponseDto } from "./dto";
 import { Seat } from "../seat/seat.entity";
 import { Flight } from "../flight/flight.entity";
 import { CheckIn } from "../check-in/check-in.entity";
-import { AuditLog } from "../audit/audit-log.entity";
+import { AuditService } from "../audit/audit.service";
 /* CheckIn entity is used within transactions via DataSource manager */
 import { RedisService, RedisKey, REDIS_TTL } from "../common/redis";
+import { MetricsService, withSpan } from "../common/observability";
 import { SeatService } from "../seat/seat.service";
 import {
   SeatStatus,
@@ -48,6 +49,8 @@ export class WaitlistService {
     private readonly redisService: RedisService,
     private readonly seatService: SeatService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly auditService: AuditService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   /**
@@ -86,7 +89,7 @@ export class WaitlistService {
       status: WaitlistStatus.WAITING,
     });
     const saved = await this.waitlistRepository.save(entry);
-    await this.createAuditLog({
+    this.auditService.log({
       entityType: "waitlist",
       entityId: saved.id,
       action: AuditAction.WAITLIST_JOINED,
@@ -95,6 +98,7 @@ export class WaitlistService {
       actorId: passengerId,
       metadata: { flightId, position: nextPosition },
     });
+    this.metricsService.waitlistDepth.labels({ flight_id: flightId }).inc();
     this.logger.log(
       `Passenger '${passengerId}' joined waitlist for flight '${flightId}' at position ${nextPosition}`,
     );
@@ -127,6 +131,9 @@ export class WaitlistService {
     }
     entry.status = WaitlistStatus.CANCELLED;
     const updated = await this.waitlistRepository.save(entry);
+    this.metricsService.waitlistDepth
+      .labels({ flight_id: entry.flightId })
+      .dec();
     this.logger.log(
       `Passenger '${passengerId}' left waitlist entry '${waitlistId}'`,
     );
@@ -168,21 +175,30 @@ export class WaitlistService {
     seatId?: string;
   }): Promise<void> {
     const { flightId } = payload;
-    const lockKey = RedisKey.waitlistLock(flightId);
-    let lock;
-    try {
-      lock = await this.redisService.acquireLock(lockKey, WAITLIST_LOCK_TTL_MS);
-    } catch {
-      this.logger.warn(
-        `Could not acquire waitlist lock for flight '${flightId}', skipping`,
-      );
-      return;
-    }
-    try {
-      await this.processWaitlistWithinLock(flightId, payload.seatId);
-    } finally {
-      await this.redisService.releaseLock(lock);
-    }
+    await withSpan(
+      "waitlist.process",
+      { flightId, seatId: payload.seatId ?? "any" },
+      async () => {
+        const lockKey = RedisKey.waitlistLock(flightId);
+        let lock;
+        try {
+          lock = await this.redisService.acquireLock(
+            lockKey,
+            WAITLIST_LOCK_TTL_MS,
+          );
+        } catch {
+          this.logger.warn(
+            `Could not acquire waitlist lock for flight '${flightId}', skipping`,
+          );
+          return;
+        }
+        try {
+          await this.processWaitlistWithinLock(flightId, payload.seatId);
+        } finally {
+          await this.redisService.releaseLock(lock);
+        }
+      },
+    );
   }
 
   /**
@@ -284,21 +300,23 @@ export class WaitlistService {
         status: CheckInStatus.IN_PROGRESS,
       });
       await manager.save(CheckIn, checkInRecord);
-      const auditLog = manager.create(AuditLog, {
-        entityType: "waitlist",
-        entityId: waitlistEntry.id,
-        action: AuditAction.WAITLIST_ASSIGNED,
-        fromState: WaitlistStatus.WAITING,
-        toState: WaitlistStatus.ASSIGNED,
-        actorId: SYSTEM_ACTOR_ID,
-        metadata: {
-          flightId,
-          seatId: seat.id,
-          passengerId,
-          checkInId: checkInRecord.id,
+      await this.auditService.logWithTransaction({
+        manager,
+        dto: {
+          entityType: "waitlist",
+          entityId: waitlistEntry.id,
+          action: AuditAction.WAITLIST_ASSIGNED,
+          fromState: WaitlistStatus.WAITING,
+          toState: WaitlistStatus.ASSIGNED,
+          actorId: SYSTEM_ACTOR_ID,
+          metadata: {
+            flightId,
+            seatId: seat.id,
+            passengerId,
+            checkInId: checkInRecord.id,
+          },
         },
       });
-      await manager.save(AuditLog, auditLog);
       return true;
     });
     if (!assigned) {
@@ -307,6 +325,10 @@ export class WaitlistService {
     const holdKey = RedisKey.seatHold(seat.id);
     await this.redisService.setSeatHold(holdKey, passengerId, HOLD_TTL_SECONDS);
     await this.seatService.invalidateCache(flightId);
+    this.metricsService.waitlistAssignmentTotal
+      .labels({ flight_id: flightId })
+      .inc();
+    this.metricsService.waitlistDepth.labels({ flight_id: flightId }).dec();
     this.eventEmitter.emit(WAITLIST_NOTIFICATION_EVENT, {
       passengerId,
       flightId,
@@ -325,19 +347,6 @@ export class WaitlistService {
       .where("waitlist.flight_id = :flightId", { flightId })
       .getRawOne();
     return (maxEntry?.maxPosition ?? 0) + 1;
-  }
-
-  private async createAuditLog(params: {
-    entityType: string;
-    entityId: string;
-    action: AuditAction;
-    fromState: string | null;
-    toState: string;
-    actorId: string;
-    metadata: Record<string, unknown>;
-  }): Promise<void> {
-    const auditLog = this.dataSource.manager.create(AuditLog, params);
-    await this.dataSource.manager.save(AuditLog, auditLog);
   }
 
   private toResponseDto(entry: Waitlist): WaitlistResponseDto {

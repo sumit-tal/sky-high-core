@@ -6,10 +6,17 @@ import { HoldExpiryService } from "./hold-expiry.service";
 import { Seat } from "../seat/seat.entity";
 import { CheckIn } from "./check-in.entity";
 import { Waitlist } from "../waitlist/waitlist.entity";
-import { AuditLog } from "../audit/audit-log.entity";
+import { AuditService } from "../audit/audit.service";
 import { SeatService } from "../seat/seat.service";
 import { RedisService } from "../common/redis";
-import { SeatStatus, CheckInStatus, AuditAction } from "../common/types/enums";
+import { MetricsService } from "../common/observability";
+import { createMockMetricsService } from "../common/observability/metrics.service.mock";
+import {
+  SeatStatus,
+  CheckInStatus,
+  WaitlistStatus,
+  AuditAction,
+} from "../common/types/enums";
 import type { SeatHoldExpiredEvent } from "../common/redis";
 
 const PASSENGER_ID = "passenger-uuid-1";
@@ -58,9 +65,12 @@ const mockTransactionManager = {
 describe("HoldExpiryService", () => {
   let service: HoldExpiryService;
   let seatRepository: jest.Mocked<Repository<Seat>>;
+  let waitlistRepository: jest.Mocked<Repository<Waitlist>>;
   let redisService: jest.Mocked<RedisService>;
   let seatService: jest.Mocked<SeatService>;
   let dataSource: jest.Mocked<DataSource>;
+  let auditService: jest.Mocked<AuditService>;
+  let eventEmitter: jest.Mocked<EventEmitter2>;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -106,13 +116,27 @@ describe("HoldExpiryService", () => {
             emit: jest.fn(),
           },
         },
+        {
+          provide: AuditService,
+          useValue: {
+            log: jest.fn(),
+            logWithTransaction: jest.fn().mockResolvedValue({}),
+          },
+        },
+        {
+          provide: MetricsService,
+          useValue: createMockMetricsService(),
+        },
       ],
     }).compile();
     service = module.get<HoldExpiryService>(HoldExpiryService);
     seatRepository = module.get(getRepositoryToken(Seat));
+    waitlistRepository = module.get(getRepositoryToken(Waitlist));
     dataSource = module.get(DataSource);
     redisService = module.get(RedisService);
     seatService = module.get(SeatService);
+    auditService = module.get(AuditService);
+    eventEmitter = module.get(EventEmitter2);
   });
 
   describe("handleHoldExpired", () => {
@@ -200,15 +224,17 @@ describe("HoldExpiryService", () => {
       );
       seatService.invalidateCache.mockResolvedValue(undefined);
       await service.releaseSeat(SEAT_ID);
-      expect(mockTransactionManager.create).toHaveBeenCalledWith(
-        AuditLog,
+      expect(auditService.logWithTransaction).toHaveBeenCalledWith(
         expect.objectContaining({
-          entityType: "seat",
-          entityId: SEAT_ID,
-          action: AuditAction.SEAT_RELEASED,
-          fromState: SeatStatus.HELD,
-          toState: SeatStatus.AVAILABLE,
-          actorId: PASSENGER_ID,
+          manager: mockTransactionManager,
+          dto: expect.objectContaining({
+            entityType: "seat",
+            entityId: SEAT_ID,
+            action: AuditAction.SEAT_RELEASED,
+            fromState: SeatStatus.HELD,
+            toState: SeatStatus.AVAILABLE,
+            actorId: PASSENGER_ID,
+          }),
         }),
       );
     });
@@ -298,6 +324,50 @@ describe("HoldExpiryService", () => {
       dataSource.transaction.mockRejectedValue(new Error("DB error"));
       await expect(service.releaseSeat(SEAT_ID)).rejects.toThrow("DB error");
       expect(redisService.releaseLock).toHaveBeenCalledWith(mockLock);
+    });
+
+    it("When hold expires, Then emits waitlist process event for the flight", async () => {
+      redisService.acquireLock.mockResolvedValue(mockLock as any);
+      seatRepository.findOne.mockResolvedValue(mockSeatHeldExpired as Seat);
+      mockTransactionManager.update.mockResolvedValue({ affected: 1 });
+      mockTransactionManager.create.mockReturnValue({});
+      mockTransactionManager.save.mockResolvedValue({});
+      dataSource.transaction.mockImplementation(async (cb: any) =>
+        cb(mockTransactionManager),
+      );
+      seatService.invalidateCache.mockResolvedValue(undefined);
+      await service.releaseSeat(SEAT_ID);
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        "waitlist.process",
+        expect.objectContaining({ flightId: FLIGHT_ID, seatId: SEAT_ID }),
+      );
+    });
+
+    it("When hold expires and waitlist entry exists, Then marks entry as EXPIRED", async () => {
+      redisService.acquireLock.mockResolvedValue(mockLock as any);
+      seatRepository.findOne.mockResolvedValue(mockSeatHeldExpired as Seat);
+      mockTransactionManager.update.mockResolvedValue({ affected: 1 });
+      mockTransactionManager.create.mockReturnValue({});
+      mockTransactionManager.save.mockResolvedValue({});
+      dataSource.transaction.mockImplementation(async (cb: any) =>
+        cb(mockTransactionManager),
+      );
+      seatService.invalidateCache.mockResolvedValue(undefined);
+      const mockWaitlistEntry = {
+        id: "waitlist-uuid-1",
+        flightId: FLIGHT_ID,
+        passengerId: PASSENGER_ID,
+        status: WaitlistStatus.ASSIGNED,
+      };
+      waitlistRepository.findOne.mockResolvedValue(mockWaitlistEntry as any);
+      waitlistRepository.save.mockResolvedValue({
+        ...mockWaitlistEntry,
+        status: WaitlistStatus.EXPIRED,
+      } as any);
+      await service.releaseSeat(SEAT_ID);
+      expect(waitlistRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: WaitlistStatus.EXPIRED }),
+      );
     });
   });
 

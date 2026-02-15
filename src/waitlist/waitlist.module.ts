@@ -4,15 +4,16 @@ import { Waitlist } from "./waitlist.entity";
 import { Seat } from "../seat/seat.entity";
 import { Flight } from "../flight/flight.entity";
 import { CheckIn } from "../check-in/check-in.entity";
-import { AuditLog } from "../audit/audit-log.entity";
 import { WaitlistController } from "./waitlist.controller";
 import { WaitlistService } from "./waitlist.service";
 import { SeatModule } from "../seat/seat.module";
+import { AuditModule } from "../audit/audit.module";
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Waitlist, Seat, Flight, CheckIn, AuditLog]),
+    TypeOrmModule.forFeature([Waitlist, Seat, Flight, CheckIn]),
     SeatModule,
+    AuditModule,
   ],
   controllers: [WaitlistController],
   providers: [WaitlistService],

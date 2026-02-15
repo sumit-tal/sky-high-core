@@ -10,7 +10,10 @@ import { Waitlist } from "./waitlist.entity";
 import { Seat } from "../seat/seat.entity";
 import { Flight } from "../flight/flight.entity";
 import { RedisService } from "../common/redis";
+import { MetricsService } from "../common/observability";
+import { createMockMetricsService } from "../common/observability/metrics.service.mock";
 import { SeatService } from "../seat/seat.service";
+import { AuditService } from "../audit/audit.service";
 import {
   SeatStatus,
   WaitlistStatus,
@@ -100,10 +103,6 @@ describe("WaitlistService", () => {
           provide: DataSource,
           useValue: {
             transaction: jest.fn(),
-            manager: {
-              create: jest.fn() as jest.Mock,
-              save: jest.fn() as jest.Mock,
-            },
           },
         },
         {
@@ -125,6 +124,17 @@ describe("WaitlistService", () => {
           useValue: {
             emit: jest.fn(),
           },
+        },
+        {
+          provide: AuditService,
+          useValue: {
+            log: jest.fn(),
+            logWithTransaction: jest.fn().mockResolvedValue({}),
+          },
+        },
+        {
+          provide: MetricsService,
+          useValue: createMockMetricsService(),
         },
       ],
     }).compile();
@@ -154,8 +164,6 @@ describe("WaitlistService", () => {
       const savedEntry = { ...mockWaitlistEntry, position: 3 };
       waitlistRepository.create.mockReturnValue(savedEntry as any);
       waitlistRepository.save.mockResolvedValue(savedEntry as any);
-      (dataSource.manager.create as jest.Mock).mockReturnValue({} as any);
-      (dataSource.manager.save as jest.Mock).mockResolvedValue({} as any);
       const result = await service.joinWaitlist({
         passengerId: PASSENGER_ID,
         flightId: FLIGHT_ID,
@@ -201,8 +209,6 @@ describe("WaitlistService", () => {
       const savedEntry = { ...mockWaitlistEntry, position: 1 };
       waitlistRepository.create.mockReturnValue(savedEntry as any);
       waitlistRepository.save.mockResolvedValue(savedEntry as any);
-      (dataSource.manager.create as jest.Mock).mockReturnValue({} as any);
-      (dataSource.manager.save as jest.Mock).mockResolvedValue({} as any);
       const result = await service.joinWaitlist({
         passengerId: PASSENGER_ID,
         flightId: FLIGHT_ID,
@@ -345,6 +351,16 @@ describe("WaitlistService", () => {
       expect(redisService.setSeatHold).not.toHaveBeenCalled();
       expect(redisService.releaseLock).toHaveBeenCalledWith(mockLock);
     });
+
+    it("When no waiting passengers, Then seat stays available and no hold is set", async () => {
+      redisService.acquireLock.mockResolvedValue(mockLock as any);
+      waitlistRepository.findOne.mockResolvedValue(null);
+      await service.processWaitlist({ flightId: FLIGHT_ID, seatId: SEAT_ID });
+      expect(seatRepository.findOne).not.toHaveBeenCalled();
+      expect(redisService.setSeatHold).not.toHaveBeenCalled();
+      expect(seatService.invalidateCache).not.toHaveBeenCalled();
+      expect(redisService.releaseLock).toHaveBeenCalledWith(mockLock);
+    });
   });
 
   describe("handleWaitlistHoldExpiry", () => {
@@ -378,6 +394,27 @@ describe("WaitlistService", () => {
       });
       expect(waitlistRepository.save).not.toHaveBeenCalled();
       expect(eventEmitter.emit).toHaveBeenCalled();
+    });
+
+    it("When waitlist-assigned hold expires, Then emits process event with seatId so next passenger gets seat", async () => {
+      const assignedEntry = {
+        ...mockWaitlistEntry,
+        status: WaitlistStatus.ASSIGNED,
+      };
+      waitlistRepository.findOne.mockResolvedValue(assignedEntry as any);
+      waitlistRepository.save.mockResolvedValue({
+        ...assignedEntry,
+        status: WaitlistStatus.EXPIRED,
+      } as any);
+      await service.handleWaitlistHoldExpiry({
+        seatId: SEAT_ID,
+        flightId: FLIGHT_ID,
+        passengerId: PASSENGER_ID,
+      });
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        "waitlist.process",
+        expect.objectContaining({ flightId: FLIGHT_ID, seatId: SEAT_ID }),
+      );
     });
   });
 });

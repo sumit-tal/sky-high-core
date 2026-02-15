@@ -5,7 +5,7 @@ import { DataSource, Repository } from "typeorm";
 import { CheckIn } from "./check-in.entity";
 import { Seat } from "../seat/seat.entity";
 import { Flight } from "../flight/flight.entity";
-import { AuditLog } from "../audit/audit-log.entity";
+import { AuditService } from "../audit/audit.service";
 import {
   CheckInResponseDto,
   CheckInCancelledResponseDto,
@@ -13,6 +13,7 @@ import {
   UpdateCheckInRequestDto,
 } from "./dto";
 import { RedisService, RedisKey, REDIS_TTL } from "../common/redis";
+import { MetricsService, withSpan } from "../common/observability";
 import { SeatService } from "../seat/seat.service";
 import { BaggageService } from "../baggage/baggage.service";
 import { PaymentService } from "../payment/payment.service";
@@ -63,6 +64,8 @@ export class CheckInService {
     private readonly baggageService: BaggageService,
     private readonly paymentService: PaymentService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly auditService: AuditService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   /**
@@ -80,15 +83,43 @@ export class CheckInService {
     dto: StartCheckInRequestDto;
   }): Promise<CheckInResponseDto> {
     const { flightId, seatId } = dto;
+    const startTime = Date.now();
     await this.validateFlightExists(flightId);
     await this.validateSeatBelongsToFlight(seatId, flightId);
     await this.validateNoActiveCheckIn(passengerId, flightId);
-    const lockKey = RedisKey.seatLock(seatId);
-    const lock = await this.redisService.acquireLock(lockKey, LOCK_TTL_MS);
     try {
-      return await this.holdSeatWithinLock({ passengerId, flightId, seatId });
-    } finally {
-      await this.redisService.releaseLock(lock);
+      const result = await withSpan(
+        "check-in.seat-hold",
+        { flightId, seatId, passengerId },
+        async () => {
+          const lockKey = RedisKey.seatLock(seatId);
+          const lock = await this.redisService.acquireLock(
+            lockKey,
+            LOCK_TTL_MS,
+          );
+          try {
+            return await this.holdSeatWithinLock({
+              passengerId,
+              flightId,
+              seatId,
+            });
+          } finally {
+            await this.redisService.releaseLock(lock);
+          }
+        },
+      );
+      const durationSec = (Date.now() - startTime) / 1000;
+      this.metricsService.checkinDurationSeconds
+        .labels({ flight_id: flightId, status: "started" })
+        .observe(durationSec);
+      return result;
+    } catch (error) {
+      if (error instanceof SeatAlreadyHeldException) {
+        this.metricsService.seatContentionTotal
+          .labels({ flight_id: flightId })
+          .inc();
+      }
+      throw error;
     }
   }
 
@@ -166,16 +197,18 @@ export class CheckInService {
         status: CheckInStatus.IN_PROGRESS,
       });
       const savedCheckIn = await manager.save(CheckIn, checkInRecord);
-      const auditLog = manager.create(AuditLog, {
-        entityType: "seat",
-        entityId: seatId,
-        action: AuditAction.SEAT_HELD,
-        fromState: SeatStatus.AVAILABLE,
-        toState: SeatStatus.HELD,
-        actorId: passengerId,
-        metadata: { flightId, checkInId: savedCheckIn.id },
+      await this.auditService.logWithTransaction({
+        manager,
+        dto: {
+          entityType: "seat",
+          entityId: seatId,
+          action: AuditAction.SEAT_HELD,
+          fromState: SeatStatus.AVAILABLE,
+          toState: SeatStatus.HELD,
+          actorId: passengerId,
+          metadata: { flightId, checkInId: savedCheckIn.id },
+        },
       });
-      await manager.save(AuditLog, auditLog);
       return savedCheckIn;
     });
     const holdKey = RedisKey.seatHold(seatId);
@@ -263,35 +296,39 @@ export class CheckInService {
           { id: checkIn.seatId },
           { status: SeatStatus.AVAILABLE, heldBy: null, heldAt: null },
         );
-        const seatAudit = manager.create(AuditLog, {
-          entityType: "seat",
-          entityId: checkIn.seatId,
-          action: AuditAction.SEAT_CANCELLED,
-          fromState:
-            checkIn.status === CheckInStatus.COMPLETED
-              ? SeatStatus.CONFIRMED
-              : SeatStatus.HELD,
-          toState: SeatStatus.AVAILABLE,
-          actorId: passengerId,
-          metadata: { flightId: checkIn.flightId, checkInId },
+        await this.auditService.logWithTransaction({
+          manager,
+          dto: {
+            entityType: "seat",
+            entityId: checkIn.seatId,
+            action: AuditAction.SEAT_CANCELLED,
+            fromState:
+              checkIn.status === CheckInStatus.COMPLETED
+                ? SeatStatus.CONFIRMED
+                : SeatStatus.HELD,
+            toState: SeatStatus.AVAILABLE,
+            actorId: passengerId,
+            metadata: { flightId: checkIn.flightId, checkInId },
+          },
         });
-        await manager.save(AuditLog, seatAudit);
       }
       await manager.update(
         CheckIn,
         { id: checkInId },
         { status: CheckInStatus.CANCELLED },
       );
-      const checkInAudit = manager.create(AuditLog, {
-        entityType: "check_in",
-        entityId: checkInId,
-        action: AuditAction.CHECKIN_CANCELLED,
-        fromState: checkIn.status,
-        toState: CheckInStatus.CANCELLED,
-        actorId: passengerId,
-        metadata: { flightId: checkIn.flightId },
+      await this.auditService.logWithTransaction({
+        manager,
+        dto: {
+          entityType: "check_in",
+          entityId: checkInId,
+          action: AuditAction.CHECKIN_CANCELLED,
+          fromState: checkIn.status,
+          toState: CheckInStatus.CANCELLED,
+          actorId: passengerId,
+          metadata: { flightId: checkIn.flightId },
+        },
       });
-      await manager.save(AuditLog, checkInAudit);
     });
     if (checkIn.seatId) {
       const holdKey = RedisKey.seatHold(checkIn.seatId);
@@ -405,16 +442,18 @@ export class CheckInService {
           { id: seatId },
           { status: SeatStatus.CONFIRMED },
         );
-        const seatAudit = manager.create(AuditLog, {
-          entityType: "seat",
-          entityId: seatId,
-          action: AuditAction.SEAT_CONFIRMED,
-          fromState: SeatStatus.HELD,
-          toState: SeatStatus.CONFIRMED,
-          actorId: checkIn.passengerId,
-          metadata: { flightId: checkIn.flightId, checkInId: checkIn.id },
+        await this.auditService.logWithTransaction({
+          manager,
+          dto: {
+            entityType: "seat",
+            entityId: seatId,
+            action: AuditAction.SEAT_CONFIRMED,
+            fromState: SeatStatus.HELD,
+            toState: SeatStatus.CONFIRMED,
+            actorId: checkIn.passengerId,
+            metadata: { flightId: checkIn.flightId, checkInId: checkIn.id },
+          },
         });
-        await manager.save(AuditLog, seatAudit);
       }
       await manager.update(
         CheckIn,
@@ -425,16 +464,18 @@ export class CheckInService {
           paymentId,
         },
       );
-      const checkInAudit = manager.create(AuditLog, {
-        entityType: "check_in",
-        entityId: checkIn.id,
-        action: AuditAction.CHECKIN_COMPLETED,
-        fromState: checkIn.status,
-        toState: CheckInStatus.COMPLETED,
-        actorId: checkIn.passengerId,
-        metadata: { flightId: checkIn.flightId, paymentId },
+      await this.auditService.logWithTransaction({
+        manager,
+        dto: {
+          entityType: "check_in",
+          entityId: checkIn.id,
+          action: AuditAction.CHECKIN_COMPLETED,
+          fromState: checkIn.status,
+          toState: CheckInStatus.COMPLETED,
+          actorId: checkIn.passengerId,
+          metadata: { flightId: checkIn.flightId, paymentId },
+        },
       });
-      await manager.save(AuditLog, checkInAudit);
     });
     if (seatId) {
       const holdKey = RedisKey.seatHold(seatId);
@@ -447,6 +488,14 @@ export class CheckInService {
     const completedCheckIn = await this.checkInRepository.findOneOrFail({
       where: { id: checkIn.id },
     });
+    const holdDurationSec =
+      (confirmedAt.getTime() - checkIn.createdAt.getTime()) / 1000;
+    this.metricsService.seatHoldDurationSeconds
+      .labels({ flight_id: checkIn.flightId })
+      .observe(holdDurationSec);
+    this.metricsService.checkinDurationSeconds
+      .labels({ flight_id: checkIn.flightId, status: "completed" })
+      .observe(holdDurationSec);
     return this.toCheckInResponse({
       checkIn: completedCheckIn,
       holdExpiresAt: null,
