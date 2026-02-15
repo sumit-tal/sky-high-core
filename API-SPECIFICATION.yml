@@ -44,7 +44,28 @@ info:
     | NotificationService | 9 | Fire-and-forget HTTP, timeout handling, error logging |
     | Controllers & Others | 126 | Controller delegation, exception filter, health checks, Redis, metrics, logging interceptor |
 
-    Run all tests: `npm run test`
+    Run all unit tests: `npm run test`
+
+    ## Integration Testing
+    End-to-end integration tests using **Jest + Testcontainers** with real PostgreSQL
+    and Redis instances. Each test suite gets fresh containers for full isolation.
+    Requires **Node.js ≥ 20** and **Docker** running locally.
+
+    **Integration Test Coverage (9 suites, 14 tests):**
+
+    | Suite | Tests | Key Scenarios |
+    |-------|-------|---------------|
+    | Concurrent Seat Hold | 2 | N parallel requests for same seat → exactly one 201, rest 409; different seats succeed concurrently |
+    | Hold Expiry | 1 | Seat hold expires → seat released to AVAILABLE, check-in CANCELLED |
+    | Full Check-In Flow | 2 | Hold → baggage (under limit) → confirm → COMPLETED; zero baggage confirm |
+    | Check-In with Payment | 2 | Overweight baggage → payment triggered → COMPLETED with paymentId; at-limit baggage → no payment |
+    | Cancellation | 2 | Cancel confirmed check-in → seat AVAILABLE; cancel triggers waitlist assignment |
+    | Waitlist Auto-Assignment | 1 | All seats held → join waitlist → seat expires → waitlisted passenger auto-assigned |
+    | Waitlist Hold Expiry | 1 | Waitlist-assigned hold expires → entry EXPIRED → next FIFO passenger gets seat |
+    | Rate Limiter | 2 | 55 requests in 2s → 429 response + abuse_event record; under-limit requests succeed |
+    | CAS Double-Release | 1 | Both keyspace + sweep fire → only one SEAT_RELEASED audit entry (at-most-once) |
+
+    Run integration tests: `npm run test:integration`
   version: 1.0.0
   contact:
     name: SkyHigh Core Team
