@@ -23,7 +23,12 @@
     "migration:generate": "npm run typeorm -- migration:generate",
     "migration:run": "npm run typeorm -- migration:run",
     "migration:revert": "npm run typeorm -- migration:revert",
-    "seed": "ts-node -r tsconfig-paths/register seeds/seed.ts"
+    "seed": "ts-node -r tsconfig-paths/register seeds/seed.ts",
+    "test:load": "./k6/run-load-tests.sh",
+    "test:load:seat-map": "./k6/run-load-tests.sh seat-map",
+    "test:load:seat-hold": "./k6/run-load-tests.sh seat-hold",
+    "test:load:e2e": "./k6/run-load-tests.sh e2e",
+    "test:load:abuse": "./k6/run-load-tests.sh abuse"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",

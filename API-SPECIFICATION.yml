@@ -66,6 +66,40 @@ info:
     | CAS Double-Release | 1 | Both keyspace + sweep fire → only one SEAT_RELEASED audit entry (at-most-once) |
 
     Run integration tests: `npm run test:integration`
+
+    ## Load Testing (k6)
+    Performance load tests using **k6** to validate P95 latency targets under
+    simulated peak traffic. Tests run against the Docker Compose environment.
+
+    **Prerequisites:** k6 installed, Docker Compose running, database seeded.
+
+    **Load Test Suites (4 scripts):**
+
+    | Suite | VUs | Duration | P95 Target | Key Scenarios |
+    |-------|-----|----------|------------|---------------|
+    | Seat Map Retrieval | 500 | 2 min | < 1s | High-concurrency reads against Redis-cached seat map endpoint |
+    | Seat Hold Acquisition | 200 | 2 min | < 500ms | Concurrent Redlock-based seat holds with contention (201/409 mix) |
+    | End-to-End Check-In | 100 | 2 min | < 5s | Full flow: hold → baggage (under limit) → confirm → cleanup |
+    | Abuse Detection | 1 burst + 20 normal | 2 min | N/A | Bot-like burst (>50 req/2s) triggers 429; normal traffic unaffected |
+
+    **Custom k6 Metrics:**
+
+    | Metric | Type | Description |
+    |--------|------|-------------|
+    | `seat_map_duration` | Trend | Seat map endpoint response time |
+    | `seat_map_fail_rate` | Rate | Seat map request failure rate |
+    | `seat_hold_duration` | Trend | Seat hold endpoint response time |
+    | `seat_hold_contention_rate` | Rate | Seat hold 409 contention rate |
+    | `e2e_flow_duration` | Trend | Full check-in flow duration |
+    | `hold_step_duration` | Trend | Hold step response time |
+    | `confirm_step_duration` | Trend | Confirm step response time |
+    | `rate_limited_429_count` | Counter | Number of 429 responses in burst |
+    | `rate_limited_triggered` | Rate | Rate of 429 responses in burst scenario |
+    | `normal_request_success_rate` | Rate | Success rate for normal-pace traffic |
+
+    Run all load tests: `npm run test:load`
+    Run individual: `npm run test:load:seat-map`, `npm run test:load:seat-hold`,
+    `npm run test:load:e2e`, `npm run test:load:abuse`
   version: 1.0.0
   contact:
     name: SkyHigh Core Team
