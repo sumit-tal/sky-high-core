@@ -117,7 +117,8 @@
       "!**/*.constant.ts",
       "!**/*.constants.ts",
       "!**/dto/**",
-      "!**/constants/**"
+      "!**/constants/**",
+      "!**/common/utils/generate-test-jwt.ts"
     ],
     "coveragePathIgnorePatterns": [
       "/node_modules/",
@@ -128,7 +129,8 @@
       "/instrumentation\\.ts$",
       "\\.constant(s)?\\.ts$",
       "/dto/",
-      "/constants/"
+      "/constants/",
+      "common/utils/generate-test-jwt.ts"
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
